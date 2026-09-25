@@ -68,7 +68,7 @@ def scenario(name):
         p['effort'] = {'level': name[7:]}
     return p
 
-DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='ramp', EFFORT_STYLE='ramp', ULTRA_EFFECT='rainbow',
+DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='ramp', EFFORT_STYLE='auto', ULTRA_EFFECT='rainbow',
                BRANCH_ICON='octicon', RESET_ICON='octicon',
                SEGMENTS='dir git session meta model effort ctx 5h 7d cache cost lines')
 
@@ -130,6 +130,10 @@ def block(d, ch, x, y, colour, bgc):
     if ch in '▁▂▃▄▅▆▇':
         f = ('▁▂▃▄▅▆▇'.index(ch) + 1) / 8
         d.rectangle([x, y + h * (1 - f), x + w - 0.01, y + h - 0.01], fill=colour); return True
+    if ch == '\ue0b6':   # rounded caps: half-disks the full height of the cell
+        d.pieslice([x, y, x + 2 * w, y + h - 0.01], 90, 270, fill=colour); return True
+    if ch == '\ue0b4':
+        d.pieslice([x - w, y, x + w, y + h - 0.01], 270, 90, fill=colour); return True
     if ch in '░▒▓':
         d.rectangle([x, y, x + w - 0.01, y + h - 0.01], fill=mix(bgc, colour, {'░': .25, '▒': .5, '▓': .75}[ch])); return True
     return False
@@ -189,7 +193,7 @@ for s in STYLES:
 show(screen(caption=('Bars: context, 5h, 7d', 'capsule')), 500)
 for s in STYLES:
     show(screen(EFFORT_STYLE=s, caption=('Effort gauge', s)), 520)
-show(screen(caption=('Effort gauge', 'ramp')), 400)
+show(screen(caption=('Effort gauge', 'same as the bars')), 400)
 # Responsive: shrink the terminal, then try the compact gauges.
 for c in range(MAXCOLS, 67, -2):
     hold(screen(cols=c, caption=('Responsive', f'{c} columns')), 45)

@@ -23,7 +23,7 @@ wiz_setup_rows() {
     fi
     wiz_row choice BAR "Bars (context, 5h, 7d)" capsule smooth blocks line segments braille ramp dots bars squares pie none
     wiz_row choice COMPACT_STYLE "Compact gauges (narrow)" capsule smooth blocks line segments braille ramp dots bars squares pie none
-    wiz_row choice EFFORT_STYLE "Effort gauge" capsule smooth blocks line segments braille ramp dots bars squares pie none
+    wiz_row choice EFFORT_STYLE "Effort gauge" auto capsule smooth blocks line segments braille ramp dots bars squares pie none
     wiz_row choice ULTRA_EFFECT "Ultracode effect" rainbow violet plain
     wiz_row choice BRANCH_ICON "Branch icon" octicon powerline devicon unicode
     wiz_row choice RESET_ICON "Reset-time icon" octicon mdi-history mdi-progress-clock mdi-refresh unicode
@@ -47,7 +47,7 @@ wiz_setup_rows() {
 
 label_of() { # human label of an option value → REPLY
     case $1 in
-        1) REPLY=on ;; 0) REPLY=off ;; session) REPLY="your last session" ;; ultracode) REPLY=ultracode ;;
+        1) REPLY=on ;; 0) REPLY=off ;; auto) REPLY="same as the bars" ;; session) REPLY="your last session" ;; ultracode) REPLY=ultracode ;;
         limits) REPLY="near the limits" ;; cold) REPLY="cold prompt cache" ;; ramp) REPLY="ramp ▁▂▄▆█" ;;
         pie) REPLY="pie ◔" ;; braille) REPLY="braille ⣿⣶⣀" ;; none) REPLY="none (value only)" ;;
         dots) REPLY="dots ●●○" ;; bars) REPLY="bars ▰▰▱" ;; squares) REPLY="squares ■■□" ;;
@@ -240,7 +240,7 @@ wizard() {
     else
         WIZ_VAL=([GLYPHS]=unicode [BAR]=smooth [BRANCH_ICON]=unicode [RESET_ICON]=unicode)
     fi
-    WIZ_VAL+=([SCENARIO]=session [COMPACT_STYLE]=ramp [EFFORT_STYLE]=ramp [ULTRA_EFFECT]=rainbow
+    WIZ_VAL+=([SCENARIO]=session [COMPACT_STYLE]=ramp [EFFORT_STYLE]=auto [ULTRA_EFFECT]=rainbow
               [AUTO_UPDATE]=1 [CODEX_MIRROR]=1 [CODEX_OPEN]=0)
     local AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines" AGENTLINE_CODEX_ITEMS=""
     local AGENTLINE_GLYPHS="" AGENTLINE_BAR="" AGENTLINE_COMPACT_STYLE="" AGENTLINE_EFFORT_STYLE="" AGENTLINE_ULTRA_EFFECT=""

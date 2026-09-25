@@ -172,7 +172,7 @@ printf '%s' "$D" "$D$R" "$D$R" "$D$L" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " $'\n' 
     bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1)
 CHECK_NAME="bootstrap: exit 0"; check test $? -eq 0
 conf="$BH/home/.config/agentline/config"
-for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=dots EFFORT_STYLE=braille ULTRA_EFFECT=violet \
+for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=dots EFFORT_STYLE=none ULTRA_EFFECT=violet \
           BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0; do
     CHECK_NAME="assistant: $kv saved"; check grep -qx "AGENTLINE_$kv" "$conf"
 done

@@ -41,10 +41,11 @@ RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-
 PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
 ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
 SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort ctx 5h 7d cache cost lines}
-EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-ramp}   # effort gauge
+EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-auto}   # effort gauge; auto = the bar style
 COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-ramp} # gauges on narrow terminals
 # Older names: minibar = the bar style, 5 cells wide; text / percent = none.
 [ "$COMPACT_STYLE" = minibar ] && COMPACT_STYLE=$BAR_STYLE
+[ "$EFFORT_STYLE" = auto ] && EFFORT_STYLE=$BAR_STYLE
 for v in BAR_STYLE COMPACT_STYLE EFFORT_STYLE; do
     case ${!v} in text|percent) printf -v "$v" none ;; esac
 done
@@ -172,10 +173,11 @@ gauge() {
             else REPLY="$REPLY${PIE_UNI[(pm * 4 + 249) / 250]}"; fi
             [ "$col" = plain ] || REPLY+=$RST; return ;;
         ramp|dots|bars|squares)
+            [ "$style" = ramp ] && w=5   # a ramp is five steps, whatever the room
             lit=$(((pm * w + 500) / 1000)); ((pm > 0 && lit == 0)) && lit=1
             for ((i = 0; i < w; i++)); do
                 case $style in
-                    ramp) on=${RAMP[i * 5 / w]} off=$on ;; dots) on=● off=○ ;;
+                    ramp) on=${RAMP[i]} off=$on ;; dots) on=● off=○ ;;
                     bars) on=▰ off=▱ ;; squares) on=■ off=□ ;;
                 esac
                 if ((i < lit)); then cell_colour "$col" $(((i * 100 + 50) / w)); out+="$REPLY$on"

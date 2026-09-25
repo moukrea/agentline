@@ -89,7 +89,7 @@ Options
                         blocks line segments braille ramp dots bars squares pie none
   --branch-icon ICON    auto | unicode | octicon | powerline | devicon
   --reset-icon ICON     auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
-  --effort-style STYLE  effort gauge, same styles (default: ramp)
+  --effort-style STYLE  effort gauge, same styles, or auto = like the bars (default)
   --compact-style STYLE gauges on narrow terminals, same styles (default: ramp)
   --ultra-effect E      rainbow | violet | plain
   --segments "LIST"     Shown parts, among: dir git session meta model effort ctx 5h 7d cache cost lines
@@ -122,7 +122,7 @@ while [ $# -gt 0 ]; do
         --bar) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[BAR]=$2; shift ;;
         --branch-icon) choice "$1" "${2-}" auto unicode octicon powerline devicon; SET[BRANCH_ICON]=$2; shift ;;
         --reset-icon) choice "$1" "${2-}" auto unicode octicon mdi-history mdi-progress-clock mdi-refresh; SET[RESET_ICON]=$2; shift ;;
-        --effort-style) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[EFFORT_STYLE]=$2; shift ;;
+        --effort-style) choice "$1" "${2-}" auto capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[EFFORT_STYLE]=$2; shift ;;
         --compact-style) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[COMPACT_STYLE]=$2; shift ;;
         --ultra-effect) choice "$1" "${2-}" rainbow violet plain; SET[ULTRA_EFFECT]=$2; shift ;;
         --segments) SET[SEGMENTS]=${2-}; shift ;;
