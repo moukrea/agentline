@@ -1,0 +1,50 @@
+{
+  "session_id": "fx-tight",
+  "cwd": "/tmp",
+  "session_name": "Refactor the billing module",
+  "effort": {
+    "level": "max"
+  },
+  "model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "workspace": {
+    "current_dir": "/tmp",
+    "project_dir": "/tmp"
+  },
+  "output_style": {
+    "name": "Concise"
+  },
+  "cost": {
+    "total_cost_usd": 10.28,
+    "total_duration_ms": 11520000,
+    "total_lines_added": 663,
+    "total_lines_removed": 41
+  },
+  "context_window": {
+    "context_window_size": 1000000,
+    "current_usage": {
+      "input_tokens": 2,
+      "cache_read_input_tokens": 880000,
+      "cache_creation_input_tokens": 1200
+    }
+  },
+  "prompt_cache": {
+    "caching_observed": true,
+    "warm": true,
+    "expires_at": 230,
+    "ttl": "1h"
+  },
+  "fast_mode": true,
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 62,
+      "resets_at": 9000
+    },
+    "seven_day": {
+      "used_percentage": 44,
+      "resets_at": 327600
+    }
+  }
+}

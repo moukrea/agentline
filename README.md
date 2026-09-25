@@ -1,0 +1,163 @@
+# agentline
+
+A two-line status line for AI coding agents in the terminal: the full version for
+**Claude Code**, a matching built-in preset for **Codex**.
+
+```
+~/…/Personal/agentline  ⎇ feat/installer +2 !1 ?3  “Refactor the billing module”          ◇ Concise  Opus 5.5 ▁▂▄▆█ medium
+context ██▋       26%  5h ██▋       27% ↻3h29  7d ████▍     44% ↻3d18h           cache 🔥 51m  $10.28 in 3h12  edits +663 −41
+```
+
+- **Line 1**: where you are (directory, git branch and status, session name) on the
+  left; who answers (output style, model, reasoning effort) on the right.
+- **Line 2**: budgets (context window, 5-hour and 7-day limits) on the left; session
+  stats (prompt cache, cost and duration, lines edited) on the right. Both right
+  blocks line up.
+
+## What it shows
+
+| Segment | Details |
+|---|---|
+| Directory | In Claude Code's own accent colour. |
+| Git | Branch, ahead/behind, then staged, modified, untracked, conflicts, stash (see [Glyphs](#glyphs)). Worktrees get their own icon. Cached 2 s per directory. |
+| Effort | 5-step gauge `▁▂▄▆█` coloured from `low` to `max`. **Ultracode** makes the model name, gauge and sparkles cycle through a rainbow. |
+| Context | Gradient bar and percentage; the percentage pulses above 85 %. |
+| 5h / 7d | Usage bar and percentage. `⚠ 1h20` in red when the current pace reaches the limit before it resets; otherwise the time until reset. |
+| Prompt cache | `🔥 51m` while warm, `⏳ 4m` in the last sixth of its TTL, `🧊 cold` once expired. A cold cache makes the next turn re-read the whole context. |
+| Cost, duration, edits | From Claude Code's session counters. |
+
+**Responsive**: every segment has progressively shorter forms. When the terminal
+narrows, each line gives up the least useful detail first (session name, edits,
+labels), then bars turn into the compact `▁▂▄▆█` gauge, then the branch name is
+truncated. It stays readable down to about 60 columns.
+
+**Fast**: one `jq` call per render and cached git and terminal lookups: about 40 ms,
+so the 1-second refresh the installer sets (needed for the animations) is cheap.
+
+## Install
+
+Requirements: bash 5, `jq`, `git`.
+
+```sh
+git clone https://github.com/moukrea/agentline.git
+cd agentline
+./install.sh                                   # Unicode glyphs, works with any font
+./install.sh --glyphs nerd --bar capsule       # recommended, with the fonts below
+```
+
+The installer finds Claude Code and Codex on the machine (or use `--claude` /
+`--codex`). It is idempotent: run it again to change an option or update, it only
+rewrites what differs. It backs up each file it edits once
+(`settings.json.agentline-backup`, `config.toml.agentline-backup`), and keeps any
+status line you had configured so `--uninstall` can put it back.
+
+```sh
+./install.sh --uninstall           # restore the previous status lines
+./install.sh --uninstall --purge   # and delete ~/.config/agentline
+```
+
+## Fonts
+
+**Recommended: [JuliaMono](https://github.com/cormullion/juliamono), with
+[Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) as fallback.**
+
+Claude Code draws its interface with about 50 symbols (`⏺ ⎿ ⏵ ⏸ ✶ ✻ ✽ ✔ ✗ ⚠ ◉ ❯ …`).
+89 free monospace fonts were compared against those symbols and this status line.
+JuliaMono is the only one that covers all of them. Iosevka, Iosevka Term and Adwaita
+Mono miss one rarely used symbol (`⎯`). Popular fonts (JetBrains Mono, Fira Code,
+Cascadia, Hack, Meslo, Monaspace…) miss 9 or more, and your terminal draws those
+with whatever fallback font it finds.
+
+JuliaMono has no icons, so Nerd glyphs (`--glyphs nerd`) come from Symbols Nerd
+Font Mono. Both fonts are free for any use: JuliaMono is under the SIL Open Font
+License 1.1, the Nerd Fonts symbols under MIT (the icon sets inside are MIT,
+Apache 2.0, OFL or CC BY 4.0).
+
+Install them:
+
+```sh
+# macOS
+brew install --cask font-juliamono font-symbols-only-nerd-font
+
+# Linux
+mkdir -p ~/.local/share/fonts && cd ~/.local/share/fonts
+curl -fLO https://github.com/cormullion/juliamono/releases/latest/download/JuliaMono-ttf.tar.gz
+tar xzf JuliaMono-ttf.tar.gz && rm JuliaMono-ttf.tar.gz
+curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.tar.xz
+tar xJf NerdFontsSymbolsOnly.tar.xz SymbolsNerdFontMono-Regular.ttf && rm NerdFontsSymbolsOnly.tar.xz
+fc-cache -f
+```
+
+Then set JuliaMono as the terminal font, with Symbols Nerd Font Mono as fallback:
+
+| Terminal | Setting |
+|---|---|
+| Ghostty | `font-family = JuliaMono` then `font-family = Symbols Nerd Font Mono` |
+| kitty | `font_family JuliaMono` and `symbol_map U+E000-U+F8FF,U+F0000-U+FFFFD Symbols Nerd Font Mono` |
+| WezTerm | `font = wezterm.font_with_fallback { 'JuliaMono', 'Symbols Nerd Font Mono' }` |
+| Alacritty, GNOME Terminal, iTerm2 | JuliaMono; Nerd symbols come from the system's font fallback |
+| VS Code | `"terminal.integrated.fontFamily": "JuliaMono, 'Symbols Nerd Font Mono'"` |
+
+## Configuration
+
+`~/.config/agentline/config`, written by the installer and read on every render.
+Environment variables with the same names override it.
+
+| Variable | Values | Default |
+|---|---|---|
+| `AGENTLINE_GLYPHS` | `unicode`, `nerd` | `unicode` |
+| `AGENTLINE_BAR` | `blocks` `█▒░`, `smooth` (eighth-cell bar on a solid rail), `line` `━╸─`, `segments` `■□`, `braille` `⣿⣀`, `capsule` (smooth with rounded Nerd caps) | `blocks` |
+| `AGENTLINE_BRANCH_ICON` | `auto`, `unicode` `⎇`, `octicon`, `powerline`, `devicon` | `auto` |
+| `AGENTLINE_RESET_ICON` | `auto`, `unicode` `↻`, `octicon` (history), `mdi-history`, `mdi-progress-clock`, `mdi-refresh` | `auto` |
+| `AGENTLINE_PATH_COLOR` | `R;G;B` | `215;119;87` (Claude Code's accent) |
+| `AGENTLINE_ICON_GAP` | `auto`, `0`, `1`: space after Nerd icons, which are often drawn wider than their cell | `auto` (on with Nerd glyphs) |
+
+`auto` icons follow `AGENTLINE_GLYPHS`: octicons with `nerd`, Unicode otherwise.
+The preview above uses `unicode` glyphs and `smooth` bars. `capsule` needs Nerd glyphs; with `unicode` it falls back to `smooth`.
+
+### Glyphs
+
+| Git state | `unicode` | `nerd` (octicons) |
+|---|---|---|
+| staged | `+` | diff-added |
+| modified, not staged | `!` | diff-modified |
+| untracked | `?` | question |
+| conflicts | `=` | alert |
+| stash | `$` | stack |
+| ahead / behind | `↑` `↓` | arrow-up / arrow-down |
+| clean | `✓` | check |
+
+The Unicode set follows [Starship](https://starship.rs)'s conventions.
+
+## Codex
+
+Codex has no external status line command: its `tui.status_line` setting is a list
+of items Codex draws itself, so custom glyphs, bars and colours are not possible
+there. The installer sets the closest preset (model and reasoning, directory, git
+branch, context used, 5-hour and weekly limits, estimated cost) and
+`status_line_use_colors = true`. Edit `codex/preset` and re-run the installer to
+change it; the file lists every available item.
+
+The installer only touches the two keys it manages in `[tui]` (tagged
+`# agentline`). A `status_line` of yours is commented out, not deleted, and
+`--uninstall` puts it back.
+
+## How ultracode is detected
+
+Claude Code reports ultracode to status lines as effort `xhigh`. The real signal is
+the `ultra_effort_enter` / `ultra_effort_exit` entry in the session transcript, or
+`"ultracode": true` in the settings. The transcript is read incrementally: only the
+bytes added since the previous render.
+
+## Development
+
+```sh
+tests/run.sh    # renders every fixture × glyph set × bar style at 17 widths,
+                # and installs / reinstalls / uninstalls in a throwaway HOME
+```
+
+CI runs ShellCheck and the suite on every push.
+
+## License
+
+MIT

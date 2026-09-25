@@ -1,0 +1,14 @@
+# Codex status line items (tui.status_line), in display order. One per line.
+# Codex draws these itself: custom glyphs and bars are not possible there.
+# Available: model-with-reasoning, reasoning, project-name, current-dir,
+# git-branch, run-state, thread-title, task-progress, context-used,
+# context-remaining, context-window-size, five-hour-limit, weekly-limit,
+# used-tokens, total-input-tokens, total-output-tokens, thread-credits,
+# estimated-thread-cost, fast-mode, codex-version, thread-id
+model-with-reasoning
+current-dir
+git-branch
+context-used
+five-hour-limit
+weekly-limit
+estimated-thread-cost

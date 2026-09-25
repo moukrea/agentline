@@ -1,0 +1,478 @@
+#!/usr/bin/env bash
+# agentline — Claude Code status line.
+#
+# Two aligned lines: where/what (dir, git, session) … who (style, model, effort)
+# then budgets (context, 5h, 7d) … session stats (prompt cache, cost, edits).
+# Reads the JSON Claude Code pipes on stdin. Single jq pass, git status cached
+# 2 s per directory, tty lookup cached per session: ~40 ms per render, so a
+# 1-second refreshInterval is cheap.
+#
+# Configuration: ${XDG_CONFIG_HOME:-~/.config}/agentline/config (shell syntax),
+# overridable by the same AGENTLINE_* variables in the environment.
+# shellcheck disable=SC2154  # payload variables are assigned by the jq eval below
+shopt -s extglob
+export LC_ALL=C.UTF-8
+
+input=$(cat)
+now=$EPOCHSECONDS
+us=${EPOCHREALTIME/./}
+# 4 animation steps per second; AGENTLINE_FRAME pins it (previews, tests).
+frame=${AGENTLINE_FRAME:-$((us / 250000))}
+CACHE_DIR="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID"
+[ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
+
+# ── Configuration ─────────────────────────────────────────────────────────
+# Environment wins over the config file, which wins over the defaults.
+declare -A ENV_OVERRIDE
+for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP; do
+    v="AGENTLINE_$k"; [ -n "${!v+x}" ] && ENV_OVERRIDE[$k]=${!v}
+done
+CONFIG_FILE="${AGENTLINE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agentline/config}"
+# shellcheck source=/dev/null
+[ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
+for k in "${!ENV_OVERRIDE[@]}"; do printf -v "AGENTLINE_$k" '%s' "${ENV_OVERRIDE[$k]}"; done
+GLYPHS=${AGENTLINE_GLYPHS:-unicode}           # unicode | nerd
+BAR_STYLE=${AGENTLINE_BAR:-blocks}             # blocks | smooth | line | segments | braille | capsule
+BRANCH_ICON=${AGENTLINE_BRANCH_ICON:-auto}     # auto | unicode | octicon | powerline | devicon
+RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
+PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
+ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
+
+# ── Glyph sets ────────────────────────────────────────────────────────────
+# Nerd Font icons are often drawn wider than their cell and overlap the next
+# character, so they are followed by a space (ICON_GAP).
+[ "$ICON_GAP" = auto ] && { [ "$GLYPHS" = nerd ] && ICON_GAP=1 || ICON_GAP=0; }
+G=""; ((ICON_GAP)) && G=" "
+[ "$BRANCH_ICON" = auto ] && { [ "$GLYPHS" = nerd ] && BRANCH_ICON=octicon || BRANCH_ICON=unicode; }
+[ "$RESET_ICON" = auto ] && { [ "$GLYPHS" = nerd ] && RESET_ICON=octicon || RESET_ICON=unicode; }
+case $BRANCH_ICON in
+    octicon) I_BRANCH=$'\uf418'"$G" ;; powerline) I_BRANCH=$'\ue0a0'"$G" ;; devicon) I_BRANCH=$'\ue725'"$G" ;;
+    *) I_BRANCH="⎇ " ;;
+esac
+case $RESET_ICON in
+    octicon) I_RESET=$'\uf464'"$G" ;; mdi-history) I_RESET=$'\U000f02da'"$G" ;;
+    mdi-progress-clock) I_RESET=$'\U000f0996'"$G" ;; mdi-refresh) I_RESET=$'\U000f0450'"$G" ;;
+    *) I_RESET="↻" ;;
+esac
+if [ "$GLYPHS" = nerd ]; then
+    # Octicons: diff-added, diff-modified, question, alert, stack, arrows, check, git-compare
+    I_STAGED=$'\uf457'"$G" I_MODIFIED=$'\uf459'"$G" I_UNTRACKED=$'\uf420'"$G" I_CONFLICT=$'\uf421'"$G"
+    I_STASH=$'\uf51e'"$G" I_AHEAD=$'\uf431' I_BEHIND=$'\uf433' I_CLEAN=$'\uf42e' I_WORKTREE=$'\uf47f'"$G"
+else
+    # Starship's conventions: + staged, ! modified, ? untracked, = conflicted, $ stashed
+    I_STAGED="+" I_MODIFIED="!" I_UNTRACKED="?" I_CONFLICT="=" I_STASH="\$"
+    I_AHEAD="↑" I_BEHIND="↓" I_CLEAN="✓" I_WORKTREE="◈ "
+fi
+
+# ── Parse everything in one jq pass ───────────────────────────────────────
+eval "$(jq -r '
+  def i: (. // 0 | if type == "number" then floor else 0 end);
+  def s: (. // "" | tostring);
+  @sh "cwd=\(.cwd // .workspace.current_dir | s)",
+  @sh "project_dir=\(.workspace.project_dir | s)",
+  @sh "worktree=\(.workspace.git_worktree | s)",
+  @sh "model=\(.model.display_name // .model.id // "?" | s)",
+  @sh "effort=\(.effort.level | s)",
+  @sh "session_id=\(.session_id | s)",
+  @sh "session_name=\(.session_name | s)",
+  @sh "transcript=\(.transcript_path | s)",
+  @sh "style=\(.output_style.name | s)",
+  @sh "agent=\(.agent.name | s)",
+  @sh "vim_mode=\(.vim.mode | s)",
+  @sh "fast=\(.fast_mode // false)",
+  @sh "ctx_size=\(.context_window.context_window_size | i)",
+  @sh "ctx_used=\(.context_window.current_usage // {} | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0))",
+  @sh "cost_c=\((.cost.total_cost_usd // 0) * 100 | round)",
+  @sh "dur_ms=\(.cost.total_duration_ms | i)",
+  @sh "l_add=\(.cost.total_lines_added | i)",
+  @sh "l_del=\(.cost.total_lines_removed | i)",
+  @sh "rl5=\(.rate_limits.five_hour.used_percentage // -1 | round)",
+  @sh "rl5_reset=\(.rate_limits.five_hour.resets_at | i)",
+  @sh "rl7=\(.rate_limits.seven_day.used_percentage // -1 | round)",
+  @sh "rl7_reset=\(.rate_limits.seven_day.resets_at | i)",
+  @sh "cache_seen=\(.prompt_cache.caching_observed // false)",
+  @sh "cache_warm=\(.prompt_cache.warm // false)",
+  @sh "cache_exp=\(.prompt_cache.expires_at | i)",
+  @sh "cache_ttl=\(.prompt_cache.ttl | s)"
+' <<<"$input" 2>/dev/null)"
+
+# ── Palette & helpers (no subshells: results go through REPLY) ────────────
+RST=$'\e[0m'; BOLD=$'\e[1m'; ITAL=$'\e[3m'
+fg() { printf -v REPLY '\e[38;2;%d;%d;%dm' "$1" "$2" "$3"; }
+PATHC=$'\e[38;2;'"${PATH_COLOR}m"
+fg 215 119 87;  ORANGE=$REPLY
+fg 100 180 255; CYAN=$REPLY
+fg 80 200 120;  GREEN=$REPLY
+fg 240 180 50;  YELLOW=$REPLY
+fg 240 80 80;   RED=$REPLY
+fg 255 120 120; RED_HI=$REPLY
+fg 190 130 255; VIOLET=$REPLY
+fg 205 205 215; TEXT=$REPLY
+fg 120 200 255; ICE=$REPLY
+fg 75 75 90;    TRACK=$REPLY
+fg 125 125 140; LABEL=$REPLY
+RAINBOW=("255;85;85" "255;140;60" "255;200;60" "200;230;60" "110;220;90" "60;220;160"
+         "60;200;230" "80;150;255" "120;110;255" "170;90;255" "230;90;230" "255;90;160")
+
+vis() { local s=${1//$'\e['*([0-9;])m/}; REPLY=${#s}; }
+
+# Heat gradient green → yellow → red for p in 0..100
+grad() {
+    local p=$1 r g b
+    ((p < 0)) && p=0; ((p > 100)) && p=100
+    if ((p < 50)); then r=$((80 + 160 * p / 50)); g=$((200 - 20 * p / 50)); b=$((120 - 70 * p / 50))
+    else r=240; g=$((180 - 100 * (p - 50) / 50)); b=$((50 + 30 * (p - 50) / 50)); fi
+    printf -v REPLY '\e[38;2;%d;%d;%dm' "$r" "$g" "$b"
+}
+
+# Progress bar with a heat gradient: bar <permille> <width> → REPLY
+EIGHTHS=(' ' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
+SHADE=(' ' '░' '░' '▒' '▒' '▒' '▓' '▓')
+BRAILLE=('⣀' '⣀' '⣄' '⣤' '⣦' '⣶' '⣷' '⣿')
+RAIL=$'\e[48;2;38;42;46m'; RAILFG=$'\e[38;2;38;42;46m'
+bar() {
+    local pm=$1 w=$2 out="" i units style=$BAR_STYLE first="" last=""
+    # Rounded caps are Nerd glyphs; without them a capsule is a smooth bar.
+    [ "$style" = capsule ] && [ "$GLYPHS" != nerd ] && style=smooth
+    ((pm > 1000)) && pm=1000; ((pm < 0)) && pm=0
+    [ "$style" = capsule ] && w=$((w - 2))
+    units=$((pm * w * 8 / 1000))
+    ((pm > 0 && units == 0)) && units=1
+    for ((i = 0; i < w; i++)); do
+        grad $(((i * 100 + 50) / w))
+        ((i == 0)) && first=$REPLY
+        if ((units >= 8)); then
+            case $style in
+                line) out+="$REPLY━" ;; segments) out+="$REPLY■" ;; braille) out+="$REPLY⣿" ;;
+                *) out+="$REPLY█" ;;
+            esac
+            units=$((units - 8)); last=$REPLY
+        elif ((units > 0)); then
+            case $style in
+                smooth|capsule) out+="$RAIL$REPLY${EIGHTHS[units]}$RST" ;;
+                line) ((units >= 4)) && out+="$REPLY╸" || out+="$TRACK─" ;;
+                segments) ((units >= 4)) && out+="$REPLY■" || out+="$TRACK□" ;;
+                braille) out+="$REPLY${BRAILLE[units]}" ;;
+                *) out+="$REPLY${SHADE[units]}" ;;
+            esac
+            units=0
+        else
+            case $style in
+                smooth|capsule) out+="$RAIL $RST" ;; line) out+="$TRACK─" ;; segments) out+="$TRACK□" ;;
+                braille) out+="$TRACK⣀" ;; *) out+="$TRACK░" ;;
+            esac
+        fi
+    done
+    if [ "$style" = capsule ]; then
+        # Rounded caps (U+E0B6 / U+E0B4), coloured like the cell they touch.
+        local lc=$RAILFG rc=$RAILFG
+        ((pm > 0)) && lc=$first; ((pm >= 1000)) && rc=$last
+        out="$lc"$'\ue0b6'"$RST$out$rc"$'\ue0b4'
+    fi
+    REPLY="$out$RST"
+}
+
+# Compact 5-step ramp gauge (same shape as the effort gauge): ramp <permille>
+RAMP=(▁ ▂ ▄ ▆ █)
+ramp() {
+    local pm=$1 lit i out=""
+    lit=$(((pm + 199) / 200)); ((lit > 5)) && lit=5
+    for ((i = 0; i < 5; i++)); do
+        if ((i < lit)); then grad $((i * 25)); out+="$REPLY${RAMP[i]}"
+        else out+="$TRACK${RAMP[i]}"; fi
+    done
+    REPLY="$out$RST"
+}
+
+pct_color() { # pct_color <pct> [force-red]
+    if [ -n "$2" ] || (($1 >= 70)); then REPLY=$RED
+    elif (($1 >= 40)); then REPLY=$YELLOW
+    else REPLY=$GREEN; fi
+}
+
+fmt_dur() {
+    local s=$1; ((s < 0)) && s=0
+    if ((s >= 86400)); then REPLY="$((s / 86400))d$((s % 86400 / 3600))h"
+    elif ((s >= 3600)); then printf -v REPLY '%dh%02d' $((s / 3600)) $((s % 3600 / 60))
+    elif ((s >= 60)); then REPLY="$((s / 60))m"
+    else REPLY="${s}s"; fi
+}
+
+# Rainbow shimmer, phase-shifted by the animation frame
+shimmer() {
+    local t=$1 out="" i ch k
+    for ((i = 0; i < ${#t}; i++)); do
+        ch=${t:i:1}
+        [[ $ch == ' ' ]] && { out+=' '; continue; }
+        k=$((((i - frame) % 12 + 12) % 12))
+        out+=$'\e[1;38;2;'"${RAINBOW[k]}m$ch"
+    done
+    REPLY="$out$RST"
+}
+
+# ── Terminal width (Claude Code gives us no TTY: use an ancestor's) ───────
+term_width() {
+    if [[ $COLUMNS -gt 0 ]] 2>/dev/null; then REPLY=$COLUMNS; return; fi
+    local f="$CACHE_DIR/tty-${session_id:-$PPID}" tty="" pid=$PPID w t pp
+    [ -r "$f" ] && read -r tty < "$f"
+    if [ -z "$tty" ] || [ ! -e "/dev/$tty" ]; then
+        tty=""
+        while [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" != 1 ]; do
+            read -r t pp < <(ps -o tty=,ppid= -p "$pid" 2>/dev/null)
+            if [ -n "$t" ] && [ "$t" != "?" ]; then tty=$t; break; fi
+            pid=$pp
+        done
+        [ -n "$tty" ] && echo "$tty" > "$f"
+    fi
+    if [ -n "$tty" ]; then w=$(stty size < "/dev/$tty" 2>/dev/null); w=${w#* }; fi
+    [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
+}
+term_width; tw=$((REPLY - 4))   # Claude Code pads the status line
+
+# ── Git (porcelain v2, cached 2 s per directory) ──────────────────────────
+is_git=0 head="" oid="" ahead=0 behind=0 stash=0 staged=0 unstaged=0 untracked=0 conflicts=0 in_wt=0
+gcache="$CACHE_DIR/git-${cwd//\//%}"
+gts=0
+# shellcheck source=/dev/null
+[ -r "$gcache" ] && . "$gcache"
+if ((now - gts >= 2)); then
+    if dirs=$(git -C "$cwd" --no-optional-locks rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null); then
+        is_git=1 head="" oid="" ahead=0 behind=0 stash=0 staged=0 unstaged=0 untracked=0 conflicts=0 in_wt=0
+        [ "${dirs%%$'\n'*}" != "${dirs##*$'\n'}" ] && in_wt=1
+        while IFS= read -r l; do
+            case $l in
+                '# branch.oid '*)  oid=${l#\# branch.oid } ;;
+                '# branch.head '*) head=${l#\# branch.head } ;;
+                '# branch.ab '*)   l=${l#\# branch.ab +}; ahead=${l%% *}; behind=${l##*-} ;;
+                '# stash '*)       stash=${l#\# stash } ;;
+                [12]' '*)          [[ ${l:2:1} != . ]] && ((staged++)); [[ ${l:3:1} != . ]] && ((unstaged++)) ;;
+                'u '*)             ((conflicts++)) ;;
+                '? '*)             ((untracked++)) ;;
+            esac
+        done < <(git -C "$cwd" --no-optional-locks status --porcelain=v2 --branch --show-stash 2>/dev/null)
+    else
+        is_git=0
+    fi
+    declare -p is_git head oid ahead behind stash staged unstaged untracked conflicts in_wt \
+        | sed 's/^declare -- //' > "$gcache.$$" 2>/dev/null
+    echo "gts=$now" >> "$gcache.$$"; mv -f "$gcache.$$" "$gcache"
+fi
+[ -n "$worktree" ] && in_wt=1
+
+# ── Ultracode detection ───────────────────────────────────────────────────
+# The payload reports ultracode as effort "xhigh"; the real signal is the
+# session's ultra_effort_enter/exit attachment in the transcript, or the
+# `ultracode: true` settings key. The transcript is scanned incrementally.
+ultra=0
+if [ "$effort" = xhigh ]; then
+    ucache="$CACHE_DIR/uc-$session_id" off=0 st=""
+    [ -r "$ucache" ] && read -r off st < "$ucache"
+    if [ -r "$transcript" ]; then
+        size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null || echo 0)
+        ((size < off)) && off=0 st=""
+        if ((size > off)); then
+            last=$(tail -c +$((off + 1)) "$transcript" | grep -o '"type":"ultra_effort_e[a-z]*"' | tail -n 1)
+            case $last in *enter*) st=on ;; *exit*) st=off ;; esac
+            echo "$size $st" > "$ucache"
+        fi
+    fi
+    if [ "$st" = on ]; then ultra=1
+    elif [ -z "$st" ] && grep -qs '"ultracode"[[:space:]]*:[[:space:]]*true' \
+            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "$project_dir/.claude/settings.json" "$project_dir/.claude/settings.local.json"; then
+        ultra=1
+    fi
+fi
+
+# ── Segments: SEG[name:variant] = rendered string; higher variants are more
+#    compact, a missing variant means "dropped" ─────────────────────────────
+declare -A SEG W NV
+put() { SEG[$1:$2]=$3; vis "$3"; W[$1:$2]=$((REPLY + ${4:-0})); NV[$1]=$(($2 + 1)); }  # [4] = extra cells (wide emoji)
+
+# ── Line 1 left: where (dir, git) and what (session name) ─────────────────
+short="${cwd/#$HOME/\~}"
+# shellcheck disable=SC2088  # a literal "~" is displayed, not expanded
+if [[ $short == */*/*/* ]]; then p=${cwd%/*}; short="~/…/${p##*/}/${cwd##*/}"; fi
+put dir 0 "${PATHC}${short}${RST}"
+put dir 1 "${PATHC}${cwd##*/}${RST}"
+
+if ((is_git)); then
+    if [ "$head" = "(detached)" ]; then branch="➦${oid:0:7}"; else branch=$head; fi
+    icon="${CYAN}${I_BRANCH}${RST}"; ((in_wt)) && icon="${VIOLET}${I_WORKTREE}${RST}${icon}"
+    sync=""; ((ahead)) && sync+="${VIOLET}${I_AHEAD}${ahead}"; ((behind)) && sync+="${VIOLET}${I_BEHIND}${behind}"
+    [ -n "$sync" ] && sync=" $sync$RST"
+    st_full=""
+    ((conflicts)) && st_full+=" ${RED}${I_CONFLICT}${conflicts}"
+    ((staged))    && st_full+=" ${GREEN}${I_STAGED}${staged}"
+    ((unstaged))  && st_full+=" ${YELLOW}${I_MODIFIED}${unstaged}"
+    st_short=$st_full
+    ((untracked)) && st_full+=" ${LABEL}${I_UNTRACKED}${untracked}"
+    ((stash))     && st_full+=" ${CYAN}${I_STASH}${stash}"
+    dirty=$((conflicts + staged + unstaged + untracked))
+    ((dirty == 0)) && st_full+=" ${GREEN}${I_CLEAN}" && st_short=$st_full
+    mark=""; ((dirty)) && mark="${YELLOW}*"; ((conflicts)) && mark="${RED}${I_CONFLICT}"
+    trunc() { if ((${#branch} > $1)); then REPLY="${branch:0:$(($1 - 1))}…"; else REPLY=$branch; fi; }
+    put git 0 "${icon}${CYAN}${branch}${RST}${sync}${st_full}${RST}"
+    trunc 28; put git 1 "${icon}${CYAN}${REPLY}${RST}${sync}${st_full}${RST}"
+    trunc 20; put git 2 "${icon}${CYAN}${REPLY}${RST}${sync}${st_short}${RST}"
+    trunc 12; put git 3 "${CYAN}${REPLY}${RST}${mark}${RST}"
+fi
+
+if [ -n "$session_name" ]; then
+    for v in 0:40 1:20; do
+        n=${v#*:}; sn=$session_name
+        ((${#sn} > n)) && sn="${sn:0:$((n - 1))}…"
+        # shellcheck disable=SC1111  # typographic quotes are displayed
+        put session "${v%:*}" "${LABEL}${ITAL}“${sn}”${RST}"
+    done
+fi
+
+# ── Line 1 right: who (output style, agent, vim, model + effort) ──────────
+meta=""
+[ -n "$style" ] && [ "$style" != default ] && meta+="${LABEL}◇ ${style}${RST}  "
+[ -n "$agent" ] && meta+="${VIOLET}@${agent}${RST}  "
+[ -n "$vim_mode" ] && meta+="${BOLD}${vim_mode}${RST}  "
+[ -n "$meta" ] && put meta 0 "${meta%  }"
+
+m="${model/ context/}"; m="${m/1 Million/1M}"
+case $effort in
+    low) lvl=1; fg 150 150 170 ;; medium) lvl=2; fg 100 160 255 ;; high) lvl=3; fg 240 190 60 ;;
+    xhigh) lvl=4; fg 245 130 50 ;; max) lvl=5; fg 240 70 90 ;; *) lvl=0; REPLY="" ;;
+esac
+ecol=$REPLY
+fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts=" ${YELLOW}»${RST}"
+if ((ultra)); then
+    SPARK=("✦" "✧" "⋆" "·" "⋆" "✧")
+    k1=$(((frame % 12 + 12) % 12)); k2=$((((frame + 6) % 12 + 12) % 12))
+    sp1=$'\e[38;2;'"${RAINBOW[k1]}m${SPARK[frame % 6]}$RST"
+    sp2=$'\e[38;2;'"${RAINBOW[k2]}m${SPARK[(frame + 3) % 6]}$RST"
+    shimmer "$m ▁▂▄▆█ ultracode"; put model 0 "$sp1 $REPLY $sp2$fastm"
+    shimmer "$m ▁▂▄▆█ ultra";     put model 1 "$sp1 $REPLY $sp2$fasts"
+    shimmer "${m%% *} ▁▂▄▆█";     put model 2 "$sp1 $REPLY$fasts"
+    shimmer "▁▂▄▆█";              put model 3 "$REPLY"
+else
+    g=""
+    if ((lvl)); then
+        g=" $ecol"; for ((i = 0; i < 5; i++)); do ((i == lvl)) && g+=$TRACK; g+=${RAMP[i]}; done; g+=$RST
+    fi
+    etxt=""; ((lvl)) && etxt=" ${ecol}${effort}${RST}"
+    put model 0 "${TEXT}${m}${RST}${g}${etxt}${fastm}"
+    put model 1 "${TEXT}${m}${RST}${g}${fasts}"
+    put model 2 "${TEXT}${m%% *}${RST}${g}${fasts}"
+    ((lvl)) && put model 3 "${g# }"
+fi
+
+# ── Line 2 left: budgets (context, 5h, 7d) ────────────────────────────────
+if ((ctx_size > 0)); then
+    pm=$((ctx_used * 1000 / ctx_size)); pct=$((pm / 10))
+    grad "$pct"; pc=$REPLY
+    if ((pct >= 85)); then ((frame / 2 % 2)) && pc="$BOLD$RED_HI" || pc="$BOLD$RED"; fi
+    printf -v ptxt '%s%d%%%s' "$pc" "$pct" "$RST"
+    bar "$pm" 10; put ctx 0 "${LABEL}context${RST} $REPLY $ptxt"
+    bar "$pm" 10; put ctx 1 "${LABEL}ctx${RST} $REPLY $ptxt"
+    ramp "$pm"; put ctx 2 "${LABEL}ctx${RST} $REPLY ${pc}${pct}%${RST}"
+fi
+
+# Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
+rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
+    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp
+    ((used < 0)) && return
+    left=$((reset - now)); el=$((now - (reset - win)))
+    if ((used >= 100)); then eta=0
+    elif ((used > 0 && el > win / 20)); then
+        local t=$(((100 - used) * el / used)); ((t < left)) && eta=$t
+    fi
+    if ((eta >= 0)); then
+        fmt_dur "$eta"; tail=" ${RED}⚠ ${REPLY}${RST}"; tail_s="${RED}⚠${RST}"; pct_color "$used" 1
+    else
+        fmt_dur "$left"; tail=" ${LABEL}${I_RESET}${REPLY}${RST}"; tail_s=""; pct_color "$used"
+    fi
+    pcol=$REPLY
+    printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
+    bar $((used * 10)) 10
+    put "$name" 0 "${LABEL}${name}${RST} $REPLY ${ptx}${tail}"
+    ramp $((used * 10)); rp=$REPLY
+    put "$name" 1 "${LABEL}${name}${RST} $rp ${ptx}${tail}"
+    put "$name" 2 "${LABEL}${name}${RST} $rp ${ptx}${tail_s}"
+}
+((rl5_reset > 0)) && rate_seg 5h "$rl5" "$rl5_reset" 18000
+((rl7_reset > 0)) && rate_seg 7d "$rl7" "$rl7_reset" 604800
+
+# ── Line 2 right: session stats (prompt cache, cost/time, edits) ──────────
+# Prompt cache: 🔥 warm, ⏳ expiring soon (last sixth of the TTL), 🧊 cold
+if [ "$cache_seen" = true ]; then
+    rem=$((cache_exp - now))
+    case $cache_ttl in *h) ttl_s=$((${cache_ttl%h} * 3600)) ;; *m) ttl_s=$((${cache_ttl%m} * 60)) ;; *) ttl_s=3600 ;; esac
+    if [ "$cache_warm" = true ] && ((rem > 0)); then
+        fmt_dur "$rem"; ttl=$REPLY
+        if ((rem * 6 > ttl_s)); then
+            put cache 0 "${LABEL}cache${RST} 🔥 ${ORANGE}${ttl}${RST}" 1
+            put cache 1 "🔥${ORANGE}${ttl}${RST}" 1
+        else
+            ((frame / 2 % 2)) && c="$BOLD$YELLOW" || c=$YELLOW
+            put cache 0 "${LABEL}cache${RST} ⏳ ${c}${ttl}${RST}" 1
+            put cache 1 "⏳${c}${ttl}${RST}" 1
+        fi
+    else
+        put cache 0 "${LABEL}cache${RST} 🧊 ${ICE}cold${RST}" 1
+        put cache 1 "🧊" 1
+    fi
+fi
+
+if ((cost_c > 0 || dur_ms > 0)); then
+    if ((cost_c >= 10000)); then cs="\$$((cost_c / 100))"; else printf -v cs '$%d.%02d' $((cost_c / 100)) $((cost_c % 100)); fi
+    fmt_dur $((dur_ms / 1000))
+    put cost 0 "${TEXT}${cs}${RST} ${LABEL}in ${REPLY}${RST}"
+    put cost 1 "${TEXT}${cs}${RST}"
+fi
+
+if ((l_add || l_del)); then
+    d=""; ((l_add)) && d+="${GREEN}+${l_add}${RST}"; ((l_del)) && d+="${d:+ }${RED}−${l_del}${RST}"
+    put lines 0 "${LABEL}edits${RST} $d"
+    put lines 1 "$d"
+fi
+
+# ── Layout: each line = left block … right block, right-aligned so the right
+#    blocks of both lines line up. Each line degrades step by step. ─────────
+GAP="  "; GAPW=2
+declare -A V
+join() { # join <seg...> → REPLY, RW
+    local out="" w=0 n k
+    for n in "$@"; do
+        k="$n:${V[$n]:-0}"
+        [ -z "${SEG[$k]}" ] && continue
+        [ -n "$out" ] && { out+=$GAP; w=$((w + GAPW)); }
+        out+=${SEG[$k]}; w=$((w + W[$k]))
+    done
+    REPLY=$out RW=$w
+}
+compose() { # compose "<left segs>" "<right segs>" → REPLY, RW
+    local l lw r rw pad
+    # shellcheck disable=SC2086  # word-splitting the segment lists is intended
+    join $1; l=$REPLY lw=$RW
+    # shellcheck disable=SC2086
+    join $2; r=$REPLY rw=$RW
+    if ((rw == 0)); then REPLY=$l RW=$lw; return; fi
+    if ((lw == 0)); then pad=$((tw - rw)); ((pad < 0)) && pad=0
+    else pad=$((tw - lw - rw)); ((pad < 3)) && pad=3; fi
+    printf -v REPLY '%s%*s%s' "$l" "$pad" "" "$r"
+    RW=$((lw + pad + rw))
+}
+fit_line() { # fit_line "<left>" "<right>" <steps...>; a step may be "a+b+c"
+    local left=$1 right=$2 step s; shift 2
+    V=()
+    compose "$left" "$right"; ((RW <= tw)) && return
+    for step in "$@"; do
+        for s in ${step//+/ }; do
+            ((${V[$s]:-0} < ${NV[$s]:-0})) && V[$s]=$((${V[$s]:-0} + 1))
+        done
+        compose "$left" "$right"; ((RW <= tw)) && return
+    done
+}
+
+fit_line "dir git session" "meta model" \
+    session meta model session git git model dir git model git model
+line1=$REPLY
+fit_line "ctx 5h 7d" "cache cost lines" \
+    lines lines cost ctx cache ctx+5h+7d cost cache 5h+7d 7d
+line2=$REPLY
+printf '%s\n%s\n' "$line1" "$line2"
