@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# agentline command: thin wrapper around the installed installer.
+set -euo pipefail
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+case ${1:-help} in
+    update)    shift; exec bash "$HERE/install.sh" --update "$@" ;;
+    configure) shift; exec bash "$HERE/install.sh" --configure "$@" ;;
+    install)   shift; exec bash "$HERE/install.sh" "$@" ;;
+    uninstall) shift; exec bash "$HERE/install.sh" --uninstall "$@" ;;
+    version)   cat "$HERE/VERSION" ;;
+    *) cat <<'USAGE'
+Usage: agentline <command>
+  configure    Choose glyphs, bars and icons again, with previews
+  update       Install the latest release if newer (--force to reinstall)
+  install      Re-run the installer (accepts installer options, see --help)
+  uninstall    Remove agentline and restore previous status lines (--purge: also the config)
+  version      Print the installed version
+USAGE
+    ;;
+esac

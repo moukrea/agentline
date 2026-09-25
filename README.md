@@ -31,30 +31,59 @@ narrows, each line gives up the least useful detail first (session name, edits,
 labels), then bars turn into the compact `▁▂▄▆█` gauge, then the branch name is
 truncated. It stays readable down to about 60 columns.
 
+**Animation**: Claude Code re-renders a status line at most once per second
+(`refreshInterval` cannot go below 1), so the ultracode rainbow is designed for one
+frame per second: a fine gradient that drifts a little each second instead of
+jumping.
+
 **Fast**: one `jq` call per render and cached git and terminal lookups: about 40 ms,
 so the 1-second refresh the installer sets (needed for the animations) is cheap.
 
 ## Install
 
-Requirements: bash 5, `jq`, `git`.
+Requirements: bash 5, `jq`, `git`, `curl`.
 
 ```sh
-git clone https://github.com/moukrea/agentline.git
-cd agentline
-./install.sh                                   # Unicode glyphs, works with any font
-./install.sh --glyphs nerd --bar capsule       # recommended, with the fonts below
+curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash
 ```
 
-The installer finds Claude Code and Codex on the machine (or use `--claude` /
-`--codex`). It is idempotent: run it again to change an option or update, it only
-rewrites what differs. It backs up each file it edits once
-(`settings.json.agentline-backup`, `config.toml.agentline-backup`), and keeps any
-status line you had configured so `--uninstall` can put it back.
+The first install opens a setup assistant in the terminal: glyphs, progress bars,
+branch and reset icons, automatic updates. Every choice is previewed with the real
+status line on a sample session, so you see how your font draws it before picking.
+Then it installs for Claude Code and Codex, whichever are on the machine.
+
+Non-interactive (CI, dotfiles), with options passed through `bash -s --`:
 
 ```sh
-./install.sh --uninstall           # restore the previous status lines
-./install.sh --uninstall --purge   # and delete ~/.config/agentline
+curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh \
+  | bash -s -- --yes --glyphs nerd --bar capsule
 ```
+
+From a clone, `./install.sh` does the same. `./install.sh --help` lists every option.
+
+The installer is idempotent: run it again at any time, it only rewrites what
+differs. It backs up each file it edits once (`settings.json.agentline-backup`,
+`config.toml.agentline-backup`) and keeps any status line you had configured, so
+uninstalling puts it back.
+
+### The `agentline` command
+
+Installed in `~/.local/bin`:
+
+```sh
+agentline configure            # run the assistant again
+agentline update               # install the latest release if newer
+agentline uninstall            # restore the previous status lines
+agentline uninstall --purge    # and delete ~/.config/agentline
+agentline version
+```
+
+### Updates
+
+With automatic updates on (the assistant's default), the status line checks for a
+new release at most once a day, in the background: rendering never waits for it.
+Your configuration is kept across updates. Turn it off with
+`agentline install --auto-update off`, or update by hand with `agentline update`.
 
 ## Fonts
 
@@ -110,6 +139,7 @@ Environment variables with the same names override it.
 | `AGENTLINE_BRANCH_ICON` | `auto`, `unicode` `⎇`, `octicon`, `powerline`, `devicon` | `auto` |
 | `AGENTLINE_RESET_ICON` | `auto`, `unicode` `↻`, `octicon` (history), `mdi-history`, `mdi-progress-clock`, `mdi-refresh` | `auto` |
 | `AGENTLINE_PATH_COLOR` | `R;G;B` | `215;119;87` (Claude Code's accent) |
+| `AGENTLINE_AUTO_UPDATE` | `1`, `0` | `1` |
 | `AGENTLINE_ICON_GAP` | `auto`, `0`, `1`: space after Nerd icons, which are often drawn wider than their cell | `auto` (on with Nerd glyphs) |
 
 `auto` icons follow `AGENTLINE_GLYPHS`: octicons with `nerd`, Unicode otherwise.
@@ -152,8 +182,9 @@ bytes added since the previous render.
 ## Development
 
 ```sh
-tests/run.sh    # renders every fixture × glyph set × bar style at 17 widths,
-                # and installs / reinstalls / uninstalls in a throwaway HOME
+tests/run.sh    # renders every fixture × glyph set × bar style at 17 widths;
+                # installs, reinstalls, updates and uninstalls in a throwaway HOME,
+                # including a simulated `curl | bash` with scripted assistant answers
 ```
 
 CI runs ShellCheck and the suite on every push.

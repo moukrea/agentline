@@ -137,5 +137,40 @@ CHECK_NAME="codex (no tui): status_line = preset"; check test "$(items "$HOME/.c
 "$ROOT/install.sh" --codex --uninstall >/dev/null
 CHECK_NAME="codex (no tui): uninstall is byte-identical"; check cmp -s "$HOME/.codex/config.toml" "$TMP/codex-orig2.toml"
 
+# ── curl | bash bootstrap, assistant, update, CLI ──────────────────────────
+echo "bootstrap and update"
+BH="$TMP/boot"; mkdir -p "$BH/home/.claude"
+benv=(env HOME="$BH/home" XDG_CONFIG_HOME="$BH/home/.config" XDG_DATA_HOME="$BH/home/.local/share" XDG_RUNTIME_DIR="$TMP/run")
+# A release tarball of the working tree, like codeload serves it (one top directory).
+mkdir -p "$TMP/pkg/agentline-test"
+cp -R "$ROOT"/{install.sh,VERSION,README.md,LICENSE,claude,codex,lib,bin} "$TMP/pkg/agentline-test/"
+tar czf "$TMP/release.tar.gz" -C "$TMP/pkg" agentline-test
+printf '1\n1\n1\n2\nn\ny\n' > "$TMP/answers"   # nerd, capsule, octicon, mdi-history, no auto-update, keep
+(cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" AGENTLINE_TTY="$TMP/answers" COLUMNS=100 \
+    bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1)
+CHECK_NAME="bootstrap: exit 0"; check test $? -eq 0
+conf="$BH/home/.config/agentline/config"
+CHECK_NAME="assistant: glyphs saved"; check grep -qx 'AGENTLINE_GLYPHS=nerd' "$conf"
+CHECK_NAME="assistant: bar saved"; check grep -qx 'AGENTLINE_BAR=capsule' "$conf"
+CHECK_NAME="assistant: reset icon saved"; check grep -qx 'AGENTLINE_RESET_ICON=mdi-history' "$conf"
+CHECK_NAME="assistant: auto-update saved"; check grep -qx 'AGENTLINE_AUTO_UPDATE=0' "$conf"
+CHECK_NAME="assistant: previews rendered"; check grep -q 'Braille' "$TMP/boot.log"
+CHECK_NAME="bootstrap: agentline command"; check test -x "$BH/home/.local/bin/agentline"
+CHECK_NAME="bootstrap: statusLine set"; check grep -q 'agentline/claude-statusline.sh' "$BH/home/.claude/settings.json"
+sumA=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
+(cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" bash -s -- --yes < "$ROOT/install.sh" > /dev/null 2>&1)
+sumB=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
+CHECK_NAME="bootstrap: second curl | bash changes nothing"; check test "$sumA" = "$sumB"
+out=$("${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" "$BH/home/.local/bin/agentline" update 2>&1)
+CHECK_NAME="update: same version is up to date"; check grep -q 'up to date' <<<"$out"
+echo 9.9.9 > "$TMP/pkg/agentline-test/VERSION"; tar czf "$TMP/release2.tar.gz" -C "$TMP/pkg" agentline-test
+"${benv[@]}" AGENTLINE_SOURCE="$TMP/release2.tar.gz" "$BH/home/.local/bin/agentline" update --quiet > "$TMP/upd.log" 2>&1
+CHECK_NAME="update: new version installed"; check test "$(cat "$BH/home/.local/share/agentline/current/VERSION")" = 9.9.9
+CHECK_NAME="update: --quiet prints nothing"; check test ! -s "$TMP/upd.log"
+CHECK_NAME="update: configuration kept"; check grep -qx 'AGENTLINE_RESET_ICON=mdi-history' "$conf"
+"${benv[@]}" "$BH/home/.local/bin/agentline" uninstall > /dev/null 2>&1
+CHECK_NAME="uninstall: command removed"; check test ! -e "$BH/home/.local/bin/agentline"
+CHECK_NAME="uninstall: statusLine removed"; check test "$(jq -c '.statusLine // null' "$BH/home/.claude/settings.json")" = null
+
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

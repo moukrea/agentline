@@ -1,34 +1,71 @@
 #!/usr/bin/env bash
 # agentline installer for Claude Code and Codex.
 #
-# Idempotent: re-run it any time, it only rewrites what differs. Each config
-# file it edits is backed up once, before its first change. A status line you
-# had before is kept aside and restored by --uninstall.
+#   curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash
+#
+# Piped like this it downloads the latest release first. Idempotent: re-run it
+# any time, it only rewrites what differs. Each config file it edits is backed
+# up once, before its first change; a status line you had before is kept aside
+# and restored by --uninstall.
 set -euo pipefail
 
-SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO=${AGENTLINE_REPO:-moukrea/agentline}
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/agentline"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agentline"
 CONF="$CONF_DIR/config"
+BIN_DIR="${AGENTLINE_BIN_DIR:-$HOME/.local/bin}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CLAUDE_SETTINGS="$CLAUDE_DIR/settings.json"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 TAG='# agentline'
 
+die() { echo "agentline: $*" >&2; exit 1; }
+
+# fetch_source <dir>: put the agentline sources in <dir>. $AGENTLINE_SOURCE (a
+# directory or .tar.gz) wins, then $AGENTLINE_REF, then the latest release.
+fetch_source() {
+    local dest=$1 ref
+    mkdir -p "$dest"
+    if [ -n "${AGENTLINE_SOURCE:-}" ]; then
+        if [ -d "$AGENTLINE_SOURCE" ]; then cp -R "$AGENTLINE_SOURCE/." "$dest/"
+        else tar xzf "$AGENTLINE_SOURCE" -C "$dest" --strip-components=1; fi
+        return
+    fi
+    command -v curl >/dev/null || die "curl is required"
+    ref=${AGENTLINE_REF:-$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)}
+    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/${ref:-main}" | tar xz -C "$dest" --strip-components=1
+}
+
+# Piped from curl (no sources next to this script): fetch them, then run the
+# installer they contain with the same arguments.
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)
+if [ ! -f "$SRC/claude/statusline.sh" ]; then
+    tmp=$(mktemp -d)
+    fetch_source "$tmp" || die "could not download agentline from github.com/$REPO"
+    AGENTLINE_FETCHED="$tmp" exec bash "$tmp/install.sh" "$@"
+fi
+VERSION=$(cat "$SRC/VERSION" 2>/dev/null || echo dev)
+
 usage() {
     cat <<'EOF'
-Usage: ./install.sh [targets] [options]
+Usage: install.sh [targets] [options]      (or: agentline <command>)
 
-Targets (default: every agent found on this machine)
+Targets (default: the agents installed last time, else every agent found)
   --claude              Claude Code status line
   --codex               Codex status line preset
 
 Options
-  --glyphs SET          unicode (default) | nerd  (needs a Nerd Font, see README)
+  --configure           Run the setup assistant (it also runs on first install)
+  --glyphs SET          unicode | nerd  (Nerd needs a Nerd Font, see README)
   --bar STYLE           blocks | smooth | line | segments | braille | capsule
   --branch-icon ICON    auto | unicode | octicon | powerline | devicon
   --reset-icon ICON     auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
+  --auto-update on|off  One background update check a day
+  --update              Install the latest release if it is newer (--force: always)
+  --yes                 Never ask; keep the saved configuration
+  --quiet               Print nothing unless something fails
   --uninstall           Remove agentline and restore the previous status lines
   --purge               With --uninstall, also delete ~/.config/agentline
   -h, --help            Show this help
@@ -37,7 +74,7 @@ Options are saved in ~/.config/agentline/config; omitted ones keep their value.
 EOF
 }
 
-do_claude=0 do_codex=0 uninstall=0 purge=0
+do_claude=0 do_codex=0 uninstall=0 purge=0 configure=0 update=0 force=0 yes=0 quiet=0
 declare -A SET=()
 choice() { # choice <flag> <value> <allowed...>
     local flag=$1 value=$2; shift 2
@@ -48,10 +85,16 @@ while [ $# -gt 0 ]; do
     case $1 in
         --claude) do_claude=1 ;;
         --codex) do_codex=1 ;;
+        --configure) configure=1 ;;
         --glyphs) choice "$1" "${2-}" unicode nerd; SET[GLYPHS]=$2; shift ;;
         --bar) choice "$1" "${2-}" blocks smooth line segments braille capsule; SET[BAR]=$2; shift ;;
         --branch-icon) choice "$1" "${2-}" auto unicode octicon powerline devicon; SET[BRANCH_ICON]=$2; shift ;;
         --reset-icon) choice "$1" "${2-}" auto unicode octicon mdi-history mdi-progress-clock mdi-refresh; SET[RESET_ICON]=$2; shift ;;
+        --auto-update) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[AUTO_UPDATE]=1 || SET[AUTO_UPDATE]=0; shift ;;
+        --update) update=1 ;;
+        --force) force=1 ;;
+        --yes|-y) yes=1 ;;
+        --quiet|-q) quiet=1 ;;
         --uninstall) uninstall=1 ;;
         --purge) purge=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -59,15 +102,38 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-if ((!do_claude && !do_codex)); then
-    { command -v claude >/dev/null || [ -d "$CLAUDE_DIR" ]; } && do_claude=1
-    { command -v codex >/dev/null || [ -d "$CODEX_DIR" ]; } && do_codex=1
-    if ((!do_claude && !do_codex)); then echo "agentline: neither Claude Code nor Codex found; pass --claude or --codex" >&2; exit 1; fi
+
+ok()   { ((quiet)) || printf '  \033[32m✓\033[0m %s\n' "$*"; }
+same() { ((quiet)) || printf '  \033[2m· %s (unchanged)\033[0m\n' "$*"; }
+note() { printf '  \033[33m!\033[0m %s\n' "$*" >&2; }
+say()  { ((quiet)) || printf '%s\n' "$*"; }
+
+# ── Update: fetch the latest release, hand over to its installer ───────────
+if ((update)); then
+    tmp=$(mktemp -d)
+    fetch_source "$tmp" || { rm -rf "$tmp"; die "update check failed (network, or github.com/$REPO unreachable)"; }
+    new=$(cat "$tmp/VERSION" 2>/dev/null || echo "?")
+    installed=$(cat "$DATA/current/VERSION" 2>/dev/null || echo none)
+    if [ "$new" = "$installed" ] && ((!force)); then
+        rm -rf "$tmp"; say "agentline $installed is up to date."; exit 0
+    fi
+    say "agentline $installed → $new"
+    args=(--yes); ((quiet)) && args+=(--quiet)
+    AGENTLINE_FETCHED="$tmp" exec bash "$tmp/install.sh" "${args[@]}"
 fi
 
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-same() { printf '  \033[2m· %s (unchanged)\033[0m\n' "$*"; }
-note() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+# Targets: explicit flags, else what was installed last time, else what exists.
+if ((!do_claude && !do_codex)); then
+    if [ -r "$DATA/targets" ]; then
+        grep -qx claude "$DATA/targets" && do_claude=1
+        grep -qx codex "$DATA/targets" && do_codex=1
+    fi
+    if ((!do_claude && !do_codex)); then
+        { command -v claude >/dev/null || [ -d "$CLAUDE_DIR" ]; } && do_claude=1
+        { command -v codex >/dev/null || [ -d "$CODEX_DIR" ]; } && do_codex=1
+    fi
+    ((do_claude || do_codex)) || die "neither Claude Code nor Codex found; pass --claude or --codex"
+fi
 
 # write_file <dest> <mode> < content: atomic, only when the content differs.
 write_file() {
@@ -83,7 +149,7 @@ backup_once() { # the first backup is the pre-agentline state; never overwritten
 
 # ── Claude Code ────────────────────────────────────────────────────────────
 claude_install() {
-    echo "Claude Code"
+    say "Claude Code"
     command -v jq >/dev/null || { note "jq is required (apt install jq / brew install jq)"; return 1; }
     mkdir -p "$DATA" "$CLAUDE_DIR"
     if write_file "$DATA/claude-statusline.sh" 755 < "$SRC/claude/statusline.sh"; then ok "script → $DATA/claude-statusline.sh"
@@ -105,7 +171,7 @@ claude_install() {
 }
 
 claude_uninstall() {
-    echo "Claude Code"
+    say "Claude Code"
     local current prev="$DATA/claude-previous-statusline.json"
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null; then
         current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
@@ -176,7 +242,7 @@ codex_render() { # codex_render install|uninstall < config.toml > config.toml
 }
 
 codex_install() {
-    echo "Codex"
+    say "Codex"
     mkdir -p "$CODEX_DIR"; [ -f "$CODEX_CONFIG" ] || : > "$CODEX_CONFIG"
     local out; out=$(mktemp)
     codex_render uninstall < "$CODEX_CONFIG" | codex_render install > "$out"
@@ -191,24 +257,48 @@ codex_install() {
 }
 
 codex_uninstall() {
-    echo "Codex"
+    say "Codex"
     [ -f "$CODEX_CONFIG" ] || { same "no config.toml"; return 0; }
     if codex_render uninstall < "$CODEX_CONFIG" | write_file "$CODEX_CONFIG" 600; then ok "tui.status_line restored"
     else same "tui.status_line (not agentline's)"; fi
 }
 
-# ── Configuration file ─────────────────────────────────────────────────────
+# ── Sources, CLI and configuration ─────────────────────────────────────────
+# The installed copy lives in $DATA/current; `agentline` points into it.
+sources_install() {
+    local new="$DATA/current.new" f
+    mkdir -p "$DATA"
+    if [ "$SRC" != "$DATA/current" ]; then
+        rm -rf "$new"; mkdir -p "$new"
+        for f in install.sh VERSION README.md LICENSE claude codex lib bin; do
+            [ -e "$SRC/$f" ] && cp -R "$SRC/$f" "$new/"
+        done
+        if [ -d "$DATA/current" ] && diff -rq "$new" "$DATA/current" >/dev/null 2>&1; then
+            rm -rf "$new"; same "agentline $VERSION in $DATA/current"
+        else
+            rm -rf "$DATA/current.old"; [ -d "$DATA/current" ] && mv "$DATA/current" "$DATA/current.old"
+            mv "$new" "$DATA/current"; rm -rf "$DATA/current.old"
+            ok "agentline $VERSION → $DATA/current"
+        fi
+    fi
+    mkdir -p "$BIN_DIR"
+    if [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ]; then same "command $BIN_DIR/agentline"
+    else ln -sfn "$DATA/current/bin/agentline" "$BIN_DIR/agentline"; ok "command $BIN_DIR/agentline"; fi
+    case ":$PATH:" in *":$BIN_DIR:"*) ;; *) ((quiet)) || note "$BIN_DIR is not in your PATH: add it to use the agentline command" ;; esac
+}
+
 config_apply() {
     mkdir -p "$CONF_DIR"
     if [ ! -f "$CONF" ]; then
         cat > "$CONF" <<'EOF'
 # agentline configuration: shell syntax, read on every render.
-# Values: see ./install.sh --help or the README. Environment variables with
-# the same names override this file.
+# Change it with `agentline configure`, or edit it (values: `agentline --help`).
+# Environment variables with the same names override this file.
 AGENTLINE_GLYPHS=unicode
 AGENTLINE_BAR=blocks
 AGENTLINE_BRANCH_ICON=auto
 AGENTLINE_RESET_ICON=auto
+AGENTLINE_AUTO_UPDATE=1
 EOF
         ok "config → $CONF"
     fi
@@ -220,23 +310,41 @@ EOF
         else echo "$line" >> "$CONF"; fi
         changed=1
     done
-    if ((changed)); then ok "config updated: $(grep -h '^AGENTLINE_' "$CONF" | tr '\n' ' ')"
+    if ((changed)); then ok "config: $(grep -h '^AGENTLINE_' "$CONF" | tr '\n' ' ')"
     else same "config ($(grep -h '^AGENTLINE_' "$CONF" | tr '\n' ' '))"; fi
 }
 
 if ((uninstall)); then
     ((do_claude)) && claude_uninstall
     ((do_codex)) && codex_uninstall
+    [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ] && rm -f "$BIN_DIR/agentline"
+    rm -rf "$DATA/current" "$DATA/targets" "$DATA/last-update-check"
     rmdir "$DATA" 2>/dev/null || true
     ((purge)) && rm -rf "$CONF_DIR" && ok "config removed"
+    ok "agentline removed"
     exit 0
 fi
 
+# The assistant runs on first install and with --configure, when a terminal is
+# there to answer (also under `curl | bash`: it reads /dev/tty).
+TTY=${AGENTLINE_TTY:-}
+if [ -z "$TTY" ] && ( : </dev/tty ) 2>/dev/null && [ -t 1 ]; then TTY=/dev/tty; fi
+if [ -n "$TTY" ] && ((!yes)) && { ((configure)) || { [ ! -f "$CONF" ] && ((${#SET[@]} == 0)); }; }; then
+    command -v jq >/dev/null || die "jq is required (apt install jq / brew install jq)"
+    # shellcheck source=lib/wizard.sh
+    . "$SRC/lib/wizard.sh"
+    wizard
+fi
+
+say "agentline $VERSION"
+sources_install
 config_apply
 rc=0
 ((do_claude)) && { claude_install || rc=1; }
 ((do_codex)) && { codex_install || rc=1; }
-if grep -q '^AGENTLINE_GLYPHS=nerd' "$CONF"; then
+{ ((do_claude)) && echo claude; ((do_codex)) && echo codex; } > "$DATA/targets"
+[ -n "${AGENTLINE_FETCHED:-}" ] && [ "$AGENTLINE_FETCHED" != "$DATA/current" ] && rm -rf "$AGENTLINE_FETCHED"
+if ((!quiet)) && grep -q '^AGENTLINE_GLYPHS=nerd' "$CONF"; then
     echo "Nerd glyphs are on: use JuliaMono with Symbols Nerd Font Mono as fallback (see README)."
 fi
 exit $rc
