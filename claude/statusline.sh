@@ -260,9 +260,10 @@ fi
 [ -n "$worktree" ] && in_wt=1
 
 # ── Ultracode detection ───────────────────────────────────────────────────
-# The payload reports ultracode as effort "xhigh"; the real signal is the
-# session's ultra_effort_enter/exit attachment in the transcript, or the
-# `ultracode: true` settings key. The transcript is scanned incrementally.
+# The payload reports ultracode as effort "xhigh"; the real signal is in the
+# transcript (the "/effort ultracode" output, then ultra_effort_enter/exit
+# attachments) or the `ultracode: true` settings key. The transcript is
+# scanned incrementally.
 ultra=0
 if [ "$effort" = xhigh ]; then
     ucache="$CACHE_DIR/uc-$session_id" off=0 st=""
@@ -271,8 +272,11 @@ if [ "$effort" = xhigh ]; then
         size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null || echo 0)
         ((size < off)) && off=0 st=""
         if ((size > off)); then
-            last=$(tail -c +$((off + 1)) "$transcript" | grep -o '"type":"ultra_effort_e[a-z]*"' | tail -n 1)
-            case $last in *enter*) st=on ;; *exit*) st=off ;; esac
+            # Latest of: the /effort command output (written at once) or the
+            # ultra_effort_enter/exit attachment (written with the next turn).
+            last=$(tail -c +$((off + 1)) "$transcript" \
+                | grep -oE '"type":"ultra_effort_e[a-z]*"|<local-command-stdout>Set effort level to [a-z]+' | tail -n 1)
+            case $last in *enter*|*"to ultracode") st=on ;; *exit*|*"Set effort level to "*) st=off ;; esac
             echo "$size $st" > "$ucache"
         fi
     fi

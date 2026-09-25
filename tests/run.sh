@@ -54,6 +54,16 @@ done
 ultra=$(jq --arg tr "$ROOT/tests/fixtures/ultra-transcript.jsonl" '.transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
     | AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="ultracode detected from the transcript"; check grep -q 'ultracode' <<<"$ultra"
+# Right after "/effort ultracode" only the command output is in the transcript.
+printf '%s\n' '{"type":"user","message":{"content":"<local-command-stdout>Set effort level to ultracode (this session only): xhigh + dynamic workflow orchestration</local-command-stdout>"}}' > "$TMP/effort-on.jsonl"
+cmd_on=$(jq --arg tr "$TMP/effort-on.jsonl" '.session_id = "fx-cmd" | .transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
+    | AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="ultracode detected from the /effort command output"; check grep -q 'ultracode' <<<"$cmd_on"
+printf '%s\n' '{"type":"user","message":{"content":"<local-command-stdout>Set effort level to xhigh</local-command-stdout>"}}' >> "$TMP/effort-on.jsonl"
+cmd_off=$(jq --arg tr "$TMP/effort-on.jsonl" '.session_id = "fx-cmd" | .transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
+    | AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="plain xhigh after leaving ultracode"; check grep -q 'xhigh' <<<"$cmd_off"
+CHECK_NAME="no ultracode after leaving it"; check test "$(grep -c 'ultracode' <<<"$cmd_off")" -eq 0
 plain=$(AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="medium effort shown without ultracode"; check grep -q 'medium' <<<"$plain"
 
