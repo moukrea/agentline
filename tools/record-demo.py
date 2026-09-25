@@ -68,8 +68,9 @@ def scenario(name):
         p['effort'] = {'level': name[7:]}
     return p
 
+# The installer's defaults on a machine with a Nerd Font.
 DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='ramp', EFFORT_STYLE='auto', ULTRA_EFFECT='rainbow',
-               BRANCH_ICON='octicon', RESET_ICON='octicon',
+               BRANCH_ICON='auto', RESET_ICON='auto',
                SEGMENTS='dir git session meta model effort ctx 5h 7d cache cost lines')
 
 @functools.lru_cache(maxsize=None)
@@ -155,15 +156,25 @@ def draw_line(img, d, x0, y, line):
             d.text((x + (CW * span) / 2, y + LH / 2), ch, font=f, fill=fg, anchor='mm')
         x += CW * span
 
-def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', ''), **opts):
+def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', '', ''), **opts):
     o = dict(DEFAULT); o.update(opts)
     l1, l2 = render(cols, scen, frame, tuple(sorted(o.items())))
     img = Image.new('RGB', (W, H), PAGE)
     d = ImageDraw.Draw(img)
     # Caption: what is being shown.
-    label, value = caption
-    d.text((PAD, 24), label, font=CAP, fill=MUTED)
-    d.text((PAD + CAP.getlength(label + '  '), 24), value, font=CAPB, fill=CLAY)
+    # Settings show their exact config variable ("AGENTLINE_X = value");
+    # anything else says what it is (a live state, the terminal width).
+    label, value, note = (caption + ('',))[:3]
+    x = PAD
+    if label.startswith('AGENTLINE_'):
+        key = ImageFont.truetype(os.path.join(args.fonts, 'JuliaMono-Regular.ttf'), 16)
+        keyb = ImageFont.truetype(os.path.join(args.fonts, 'JuliaMono-Bold.ttf'), 16)
+        d.text((x, 26), label + ' = ', font=key, fill=MUTED); x += key.getlength(label + ' = ')
+        d.text((x, 26), value, font=keyb, fill=CLAY); x += keyb.getlength(value)
+    else:
+        d.text((x, 24), label, font=CAP, fill=MUTED); x += CAP.getlength(label + '  ')
+        d.text((x, 24), value, font=CAPB, fill=CLAY); x += CAPB.getlength(value)
+    if note: d.text((x + 14, 24), note, font=CAP, fill=MUTED)
     # Terminal window, as wide as the simulated terminal.
     tw = cols * CW + 24
     d.rounded_rectangle([PAD, TOP, PAD + tw, TOP + ROWS * LH + 24], radius=10, fill=BG, outline=BORDER)
@@ -184,49 +195,54 @@ def fade(img, steps=4, ms=45):
         frames.append((Image.blend(prev, img, k / (steps + 1)), ms))
 def show(img, ms): fade(img); hold(img, ms)
 
-hold(screen(caption=('agentline', 'for Claude Code')), 1800)
+hold(screen(caption=('agentline', 'default settings')), 1800)
+# Session state, not a setting: the effort level set in Claude Code.
 for lvl in ['low', 'medium', 'high', 'xhigh', 'max']:
-    show(screen(scen='effort:' + lvl, caption=('Reasoning effort', lvl)), 650)
-show(screen(caption=('Reasoning effort', 'medium')), 500)
-for s in STYLES:
-    show(screen(BAR=s, caption=('Bars: context, 5h, 7d', s)), 600)
-show(screen(caption=('Bars: context, 5h, 7d', 'capsule')), 500)
-for s in STYLES:
-    show(screen(EFFORT_STYLE=s, caption=('Effort gauge', s)), 520)
-show(screen(caption=('Effort gauge', 'same as the bars')), 400)
-# Responsive: shrink the terminal, then try the compact gauges.
+    show(screen(scen='effort:' + lvl, caption=('Live state · reasoning effort', lvl, 'set with /effort in Claude Code')), 650)
+show(screen(caption=('agentline', 'default settings')), 500)
+for s_ in STYLES:
+    show(screen(BAR=s_, caption=('AGENTLINE_BAR', s_)), 600)
+show(screen(caption=('AGENTLINE_BAR', 'capsule', 'default')), 500)
+for s_ in STYLES:
+    show(screen(EFFORT_STYLE=s_, caption=('AGENTLINE_EFFORT_STYLE', s_)), 520)
+show(screen(caption=('AGENTLINE_EFFORT_STYLE', 'auto', 'default: same style as the bars')), 700)
+# Not a setting: the terminal gets narrower and the layout adapts.
 for c in range(MAXCOLS, 67, -2):
-    hold(screen(cols=c, caption=('Responsive', f'{c} columns')), 45)
-hold(screen(cols=68, caption=('Responsive', '68 columns')), 900)
-for s in STYLES:
-    show(screen(cols=68, COMPACT_STYLE=s, caption=('Compact gauges', s)), 520)
-show(screen(cols=68, caption=('Compact gauges', 'ramp')), 400)
+    hold(screen(cols=c, caption=('Terminal width', f'{c} columns', 'the layout adapts')), 45)
+hold(screen(cols=68, caption=('Terminal width', '68 columns', 'the layout adapts')), 900)
+for s_ in STYLES:
+    show(screen(cols=68, COMPACT_STYLE=s_, caption=('AGENTLINE_COMPACT_STYLE', s_, 'gauges on narrow terminals')), 520)
+show(screen(cols=68, caption=('AGENTLINE_COMPACT_STYLE', 'ramp', 'default')), 400)
 for c in range(68, MAXCOLS + 1, 2):
-    hold(screen(cols=c, caption=('Responsive', f'{c} columns')), 35)
-hold(screen(caption=('Responsive', f'{MAXCOLS} columns')), 700)
-show(screen(GLYPHS='unicode', BAR='smooth', BRANCH_ICON='unicode', RESET_ICON='unicode', caption=('Glyphs', 'Unicode, any font')), 1300)
-show(screen(caption=('Glyphs', 'Nerd Font icons')), 1100)
-for b in ['powerline', 'devicon', 'unicode', 'octicon']:
-    show(screen(BRANCH_ICON=b, caption=('Branch icon', b)), 520)
-for r in ['mdi-history', 'mdi-progress-clock', 'mdi-refresh', 'unicode', 'octicon']:
-    show(screen(RESET_ICON=r, caption=('Reset-time icon', r)), 520)
-# Live states, animated at one frame per second like in Claude Code.
-fade(screen(scen='limits', frame=0, caption=('Near the limits', '⚠ = limit reached before reset at this pace')))
+    hold(screen(cols=c, caption=('Terminal width', f'{c} columns', 'the layout adapts')), 35)
+hold(screen(caption=('Terminal width', f'{MAXCOLS} columns', 'the layout adapts')), 700)
+show(screen(GLYPHS='unicode', caption=('AGENTLINE_GLYPHS', 'unicode', 'any font; capsule falls back to smooth')), 1400)
+show(screen(caption=('AGENTLINE_GLYPHS', 'nerd', 'default with a Nerd Font')), 1000)
+for b_ in ['octicon', 'powerline', 'devicon', 'unicode']:
+    show(screen(BRANCH_ICON=b_, caption=('AGENTLINE_BRANCH_ICON', b_)), 560)
+show(screen(caption=('AGENTLINE_BRANCH_ICON', 'auto', 'default: octicon with Nerd glyphs')), 500)
+for r_ in ['octicon', 'mdi-history', 'mdi-progress-clock', 'mdi-refresh', 'unicode']:
+    show(screen(RESET_ICON=r_, caption=('AGENTLINE_RESET_ICON', r_)), 560)
+show(screen(caption=('AGENTLINE_RESET_ICON', 'auto', 'default: octicon with Nerd glyphs')), 500)
+# Session states, animated at one frame per second like in Claude Code.
+cap = ('Live state · usage', 'near the limits', 'red warning: the limit is reached before it resets, at this pace')
+fade(screen(scen='limits', frame=0, caption=cap))
 for f in range(4):
-    hold(screen(scen='limits', frame=f, caption=('Near the limits', '⚠ = limit reached before reset at this pace')), 1000)
-fade(screen(scen='expiring', frame=0, caption=('Prompt cache', 'expiring soon')))
+    hold(screen(scen='limits', frame=f, caption=cap), 1000)
+cap = ('Live state · prompt cache', 'expiring soon')
+fade(screen(scen='expiring', frame=0, caption=cap))
 for f in range(3):
-    hold(screen(scen='expiring', frame=f, caption=('Prompt cache', 'expiring soon')), 1000)
-show(screen(scen='cold', caption=('Prompt cache', 'cold: the next turn re-reads the context')), 1400)
+    hold(screen(scen='expiring', frame=f, caption=cap), 1000)
+show(screen(scen='cold', caption=('Live state · prompt cache', 'cold', 'the next turn re-reads the context')), 1400)
 for effect, n in [('rainbow', 6), ('violet', 6), ('plain', 1)]:
-    fade(screen(scen='ultra', frame=0, ULTRA_EFFECT=effect, caption=('Ultracode', effect + ', 1 frame per second')))
+    cap = ('AGENTLINE_ULTRA_EFFECT', effect, 'in an ultracode session · 1 frame per second')
+    fade(screen(scen='ultra', frame=0, ULTRA_EFFECT=effect, caption=cap))
     for f in range(n):
-        hold(screen(scen='ultra', frame=f, ULTRA_EFFECT=effect, caption=('Ultracode', effect + ', 1 frame per second')), 1000 if n > 1 else 1300)
-# Show or hide each part.
+        hold(screen(scen='ultra', frame=f, ULTRA_EFFECT=effect, caption=cap), 1000 if n > 1 else 1300)
 segs = DEFAULT['SEGMENTS'].split()
 for gone in ['session', 'cost', 'lines', 'cache', 'meta']:
     segs.remove(gone)
-    show(screen(SEGMENTS=' '.join(segs), caption=('Show or hide each part', 'without ' + gone)), 700)
+    show(screen(SEGMENTS=' '.join(segs), caption=('AGENTLINE_SEGMENTS', '"' + ' '.join(segs) + '"')), 800)
 show(screen(caption=('agentline configure', 'to pick yours, with a live preview')), 2600)
 
 # ── encode ────────────────────────────────────────────────────────────────
