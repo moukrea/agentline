@@ -149,7 +149,7 @@ def draw_line(img, d, x0, y, line):
         o = ord(ch)
         if ch == ' ': pass
         elif block(d, ch, x, y, fg, bgc): pass
-        elif o >= 0x1F000 or ch in '⏳⌛⚡':
+        elif 0x1F000 <= o < 0xF0000 or ch in '⏳⌛⚡':   # emoji, not the Nerd private-use plane
             e = emoji(ch, round(LH * 0.82)); img.paste(e, (round(x + (CW * 2 - e.width) / 2), round(y + (LH - e.height) / 2)), e)
         else:
             f = F['nerd'] if 0xE000 <= o <= 0xF8FF or o >= 0xF0000 else F['b' if st['bold'] else 'i' if st['italic'] else 'r']
