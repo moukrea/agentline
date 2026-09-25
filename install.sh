@@ -62,6 +62,10 @@ Options
   --bar STYLE           blocks | smooth | line | segments | braille | capsule
   --branch-icon ICON    auto | unicode | octicon | powerline | devicon
   --reset-icon ICON     auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
+  --effort-style S      ramp | dots | bars | squares | text
+  --compact-style S     ramp | minibar | pie | braille | percent  (gauges on narrow terminals)
+  --ultra-effect E      rainbow | violet | plain
+  --segments "LIST"     Shown parts, among: dir git session meta model effort ctx 5h 7d cache cost lines
   --auto-update on|off  One background update check a day
   --update              Install the latest release if it is newer (--force: always)
   --yes                 Never ask; keep the saved configuration
@@ -90,6 +94,10 @@ while [ $# -gt 0 ]; do
         --bar) choice "$1" "${2-}" blocks smooth line segments braille capsule; SET[BAR]=$2; shift ;;
         --branch-icon) choice "$1" "${2-}" auto unicode octicon powerline devicon; SET[BRANCH_ICON]=$2; shift ;;
         --reset-icon) choice "$1" "${2-}" auto unicode octicon mdi-history mdi-progress-clock mdi-refresh; SET[RESET_ICON]=$2; shift ;;
+        --effort-style) choice "$1" "${2-}" ramp dots bars squares text; SET[EFFORT_STYLE]=$2; shift ;;
+        --compact-style) choice "$1" "${2-}" ramp minibar pie braille percent; SET[COMPACT_STYLE]=$2; shift ;;
+        --ultra-effect) choice "$1" "${2-}" rainbow violet plain; SET[ULTRA_EFFECT]=$2; shift ;;
+        --segments) SET[SEGMENTS]=${2-}; shift ;;
         --auto-update) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[AUTO_UPDATE]=1 || SET[AUTO_UPDATE]=0; shift ;;
         --update) update=1 ;;
         --force) force=1 ;;
@@ -194,7 +202,10 @@ claude_uninstall() {
 # yours is commented out as "# agentline-replaced: …" and restored on removal.
 codex_render() { # codex_render install|uninstall < config.toml > config.toml
     local items
-    items=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | sed 's/.*/"&"/' | paste -sd, - | sed 's/,/, /g')
+    local list
+    list=$(sed -n 's/^AGENTLINE_CODEX_ITEMS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF" 2>/dev/null)
+    [ -n "$list" ] || list=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
+    items=$(printf '%s\n' $list | sed 's/.*/"&"/' | paste -sd, - | sed 's/,/, /g')
     awk -v mode="$1" -v tag="$TAG" -v items="$items" '
         # out(): print, flushing the blank lines held back before it.
         function out(l) { while (blanks > 0) { print ""; blanks-- } print l }
@@ -305,6 +316,7 @@ EOF
     local k line changed=0
     for k in "${!SET[@]}"; do
         line="AGENTLINE_$k=${SET[$k]}"
+        [[ ${SET[$k]} == *" "* || -z ${SET[$k]} ]] && line="AGENTLINE_$k=\"${SET[$k]}\""
         grep -qx "$line" "$CONF" && continue
         if grep -q "^AGENTLINE_$k=" "$CONF"; then sed -i.bak "s|^AGENTLINE_$k=.*|$line|" "$CONF" && rm -f "$CONF.bak"
         else echo "$line" >> "$CONF"; fi

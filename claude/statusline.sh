@@ -20,11 +20,12 @@ now=$EPOCHSECONDS
 frame=${AGENTLINE_FRAME:-$now}
 CACHE_DIR="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID"
 [ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
+[ -z "${AGENTLINE_DEMO_GIT:-}" ] && [ -n "$input" ] && printf '%s' "$input" > "$CACHE_DIR/last-payload.json"
 
 # ── Configuration ─────────────────────────────────────────────────────────
 # Environment wins over the config file, which wins over the defaults.
 declare -A ENV_OVERRIDE
-for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP AUTO_UPDATE; do
+for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP AUTO_UPDATE SEGMENTS EFFORT_STYLE COMPACT_STYLE ULTRA_EFFECT; do
     v="AGENTLINE_$k"; [ -n "${!v+x}" ] && ENV_OVERRIDE[$k]=${!v}
 done
 CONFIG_FILE="${AGENTLINE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agentline/config}"
@@ -37,6 +38,11 @@ BRANCH_ICON=${AGENTLINE_BRANCH_ICON:-auto}     # auto | unicode | octicon | powe
 RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
 PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
 ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
+SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort ctx 5h 7d cache cost lines}
+EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-ramp}   # ramp | dots | bars | squares | text
+COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-ramp} # ramp | minibar | pie | braille | percent
+ULTRA_EFFECT=${AGENTLINE_ULTRA_EFFECT:-rainbow} # rainbow | violet | plain
+declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 
 # ── Glyph sets ────────────────────────────────────────────────────────────
 # Nerd Font icons are often drawn wider than their cell and overlap the next
@@ -57,7 +63,7 @@ esac
 if [ "$GLYPHS" = nerd ]; then
     # Octicons: diff-added, diff-modified, question, alert, stack, arrows, check, git-compare
     I_STAGED=$'\uf457'"$G" I_MODIFIED=$'\uf459'"$G" I_UNTRACKED=$'\uf420'"$G" I_CONFLICT=$'\uf421'"$G"
-    I_STASH=$'\uf51e'"$G" I_AHEAD=$'\uf431' I_BEHIND=$'\uf433' I_CLEAN=$'\uf42e' I_WORKTREE=$'\uf47f'"$G"
+    I_STASH=$'\uf51e'"$G" I_AHEAD=$'\uf431'"$G" I_BEHIND=$'\uf433'"$G" I_CLEAN=$'\uf42e' I_WORKTREE=$'\uf47f'"$G"
 else
     # Starship's conventions: + staged, ! modified, ? untracked, = conflicted, $ stashed
     I_STAGED="+" I_MODIFIED="!" I_UNTRACKED="?" I_CONFLICT="=" I_STASH="\$"
@@ -192,6 +198,40 @@ ramp() {
     REPLY="$out$RST"
 }
 
+# Compact gauge for narrow terminals: compact <permille> → REPLY ("" = none)
+PIE_NERD=($'\U000f0766' $'\U000f0a9e' $'\U000f0a9f' $'\U000f0aa0' $'\U000f0aa1' $'\U000f0aa2' $'\U000f0aa3' $'\U000f0aa4' $'\U000f0aa5')
+PIE_UNI=(○ ◔ ◑ ◕ ●)
+compact() {
+    local pm=$1 i
+    ((pm > 1000)) && pm=1000; ((pm < 0)) && pm=0
+    case $COMPACT_STYLE in
+        minibar) bar "$pm" 5 ;;
+        pie)
+            grad $((pm / 10))
+            if [ "$GLYPHS" = nerd ]; then i=$(((pm * 8 + 999) / 1000)); REPLY="$REPLY${PIE_NERD[i]}$G$RST"
+            else i=$(((pm * 4 + 249) / 250)); REPLY="$REPLY${PIE_UNI[i]}$RST"; fi ;;
+        braille) grad $((pm / 10)); REPLY="$REPLY${BRAILLE[pm * 7 / 1000]}$RST" ;;
+        percent) REPLY="" ;;
+        *) ramp "$pm" ;;
+    esac
+}
+
+# Effort gauge: effort_gauge <level 1-5> <colour> → REPLY (plain when colour is "")
+effort_gauge() {
+    local lvl=$1 col=$2 i lit dim out=""
+    case $EFFORT_STYLE in
+        dots) lit=(● ● ● ● ●) dim=(○ ○ ○ ○ ○) ;; bars) lit=(▰ ▰ ▰ ▰ ▰) dim=(▱ ▱ ▱ ▱ ▱) ;;
+        squares) lit=(■ ■ ■ ■ ■) dim=(□ □ □ □ □) ;; text) REPLY=""; return ;;
+        *) lit=("${RAMP[@]}") dim=("${RAMP[@]}") ;;
+    esac
+    for ((i = 0; i < 5; i++)); do
+        if [ -z "$col" ]; then out+=${lit[i]}
+        elif ((i < lvl)); then out+="$col${lit[i]}"
+        else out+="$TRACK${dim[i]}"; fi
+    done
+    REPLY="$out${col:+$RST}"
+}
+
 pct_color() { # pct_color <pct> [force-red]
     if [ -n "$2" ] || (($1 >= 70)); then REPLY=$RED
     elif (($1 >= 40)); then REPLY=$YELLOW
@@ -217,6 +257,28 @@ shimmer() {
         out+=$'\e[1;38;2;'"${REPLY}m$ch"
     done
     REPLY="$out$RST"
+}
+
+# Claude Code's ultracode violet with a highlight sweeping across the text,
+# three characters per second.
+violet() {
+    local t=$1 out="" i ch d pos
+    pos=$(((frame * 3) % (${#t} + 8) - 4))
+    for ((i = 0; i < ${#t}; i++)); do
+        ch=${t:i:1}
+        [[ $ch == ' ' ]] && { out+=' '; continue; }
+        d=$((i - pos)); ((d < 0)) && d=$((-d))
+        case $d in 0) c="240;232;255" ;; 1) c="215;195;255" ;; 2) c="195;165;255" ;; *) c="175;135;255" ;; esac
+        out+=$'\e[1;38;2;'"${c}m$ch"
+    done
+    REPLY="$out$RST"
+}
+ultra_fx() { # ultra_fx <text> → REPLY
+    case $ULTRA_EFFECT in
+        violet) violet "$1" ;;
+        plain) REPLY=$'\e[1;38;2;175;135;255m'"$1$RST" ;;
+        *) shimmer "$1" ;;
+    esac
 }
 
 # ── Terminal width (Claude Code gives us no TTY: use an ancestor's) ───────
@@ -303,7 +365,7 @@ fi
 # ── Segments: SEG[name:variant] = rendered string; higher variants are more
 #    compact, a missing variant means "dropped" ─────────────────────────────
 declare -A SEG W NV
-put() { SEG[$1:$2]=$3; vis "$3"; W[$1:$2]=$((REPLY + ${4:-0})); NV[$1]=$(($2 + 1)); }  # [4] = extra cells (wide emoji)
+put() { [ -n "${ON[$1]:-}" ] || return 0; SEG[$1:$2]=$3; vis "$3"; W[$1:$2]=$((REPLY + ${4:-0})); NV[$1]=$(($2 + 1)); }  # [4] = extra cells (wide emoji)
 
 # ── Line 1 left: where (dir, git) and what (session name) ─────────────────
 short="${cwd/#$HOME/\~}"
@@ -315,7 +377,7 @@ put dir 1 "${PATHC}${cwd##*/}${RST}"
 if ((is_git)); then
     if [ "$head" = "(detached)" ]; then branch="➦${oid:0:7}"; else branch=$head; fi
     icon="${CYAN}${I_BRANCH}${RST}"; ((in_wt)) && icon="${VIOLET}${I_WORKTREE}${RST}${icon}"
-    sync=""; ((ahead)) && sync+="${VIOLET}${I_AHEAD}${ahead}"; ((behind)) && sync+="${VIOLET}${I_BEHIND}${behind}"
+    sync=""; ((ahead)) && sync+="${VIOLET}${I_AHEAD}${ahead}"; ((behind)) && sync+="${sync:+ }${VIOLET}${I_BEHIND}${behind}"
     [ -n "$sync" ] && sync=" $sync$RST"
     st_full=""
     ((conflicts)) && st_full+=" ${RED}${I_CONFLICT}${conflicts}"
@@ -357,24 +419,35 @@ case $effort in
 esac
 ecol=$REPLY
 fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts=" ${YELLOW}»${RST}"
+show_model=${ON[model]:-}; show_effort=${ON[effort]:-}
+[ -n "$show_model$show_effort" ] && ON[model]=1
+mname=""; [ -n "$show_model" ] && mname=$m
 if ((ultra)); then
-    SPARK=("✦" "✧" "⋆" "·" "⋆" "✧")
-    hue $((-frame * 15 - 18)); sp1=$'\e[38;2;'"${REPLY}m${SPARK[frame % 6]}$RST"
-    hue $((-frame * 15 + 180)); sp2=$'\e[38;2;'"${REPLY}m${SPARK[(frame + 3) % 6]}$RST"
-    shimmer "$m ▁▂▄▆█ ultracode"; put model 0 "$sp1 $REPLY $sp2$fastm"
-    shimmer "$m ▁▂▄▆█ ultra";     put model 1 "$sp1 $REPLY $sp2$fasts"
-    shimmer "${m%% *} ▁▂▄▆█";     put model 2 "$sp1 $REPLY$fasts"
-    shimmer "▁▂▄▆█";              put model 3 "$REPLY"
-else
-    g=""
-    if ((lvl)); then
-        g=" $ecol"; for ((i = 0; i < 5; i++)); do ((i == lvl)) && g+=$TRACK; g+=${RAMP[i]}; done; g+=$RST
+    g=""; [ -n "$show_effort" ] && { effort_gauge 5 ""; g=$REPLY; }
+    word=""; [ -n "$show_effort" ] && word="ultracode"
+    sp1="" sp2=""
+    if [ "$ULTRA_EFFECT" != plain ]; then
+        SPARK=("✦" "✧" "⋆" "·" "⋆" "✧")
+        if [ "$ULTRA_EFFECT" = violet ]; then
+            ((frame % 2)) && c1="240;232;255" c2="175;135;255" || c1="175;135;255" c2="240;232;255"
+            sp1=$'\e[38;2;'"${c1}m${SPARK[frame % 6]}$RST " sp2=" "$'\e[38;2;'"${c2}m${SPARK[(frame + 3) % 6]}$RST"
+        else
+            hue $((-frame * 15 - 18)); sp1=$'\e[38;2;'"${REPLY}m${SPARK[frame % 6]}$RST "
+            hue $((-frame * 15 + 180)); sp2=" "$'\e[38;2;'"${REPLY}m${SPARK[(frame + 3) % 6]}$RST"
+        fi
     fi
-    etxt=""; ((lvl)) && etxt=" ${ecol}${effort}${RST}"
-    put model 0 "${TEXT}${m}${RST}${g}${etxt}${fastm}"
-    put model 1 "${TEXT}${m}${RST}${g}${fasts}"
-    put model 2 "${TEXT}${m%% *}${RST}${g}${fasts}"
-    ((lvl)) && put model 3 "${g# }"
+    t="$mname${g:+ $g}${word:+ $word}"; ultra_fx "${t# }"; put model 0 "$sp1$REPLY$sp2$fastm"
+    t="$mname${g:+ $g}${word:+ ultra}"; ultra_fx "${t# }"; put model 1 "$sp1$REPLY$sp2$fasts"
+    t="${mname%% *}${g:+ $g}"; ultra_fx "${t# }"; put model 2 "$sp1$REPLY$fasts"
+    [ -n "$g" ] && { ultra_fx "$g"; put model 3 "$REPLY"; }
+else
+    g=""; ((lvl)) && [ -n "$show_effort" ] && { effort_gauge "$lvl" "$ecol"; g=${REPLY:+ $REPLY}; }
+    etxt=""; ((lvl)) && [ -n "$show_effort" ] && etxt=" ${ecol}${effort}${RST}"
+    mt=""; [ -n "$mname" ] && mt="${TEXT}${mname}${RST}"
+    t="$mt$g$etxt$fastm"; put model 0 "${t# }"
+    t="$mt$g$fasts"; [ -n "$g$mt" ] || t="$mt$etxt$fasts"; put model 1 "${t# }"
+    t="${mname:+${TEXT}${mname%% *}${RST}}$g$fasts"; [ -n "$g$mname" ] || t="$etxt"; put model 2 "${t# }"
+    [ -n "$g" ] && put model 3 "${g# }"
 fi
 
 # ── Line 2 left: budgets (context, 5h, 7d) ────────────────────────────────
@@ -385,7 +458,7 @@ if ((ctx_size > 0)); then
     printf -v ptxt '%s%d%%%s' "$pc" "$pct" "$RST"
     bar "$pm" 10; put ctx 0 "${LABEL}context${RST} $REPLY $ptxt"
     bar "$pm" 10; put ctx 1 "${LABEL}ctx${RST} $REPLY $ptxt"
-    ramp "$pm"; put ctx 2 "${LABEL}ctx${RST} $REPLY ${pc}${pct}%${RST}"
+    compact "$pm"; put ctx 2 "${LABEL}ctx${RST}${REPLY:+ $REPLY} ${pc}${pct}%${RST}"
 fi
 
 # Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
@@ -406,9 +479,9 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
     bar $((used * 10)) 10
     put "$name" 0 "${LABEL}${name}${RST} $REPLY ${ptx}${tail}"
-    ramp $((used * 10)); rp=$REPLY
-    put "$name" 1 "${LABEL}${name}${RST} $rp ${ptx}${tail}"
-    put "$name" 2 "${LABEL}${name}${RST} $rp ${ptx}${tail_s}"
+    compact $((used * 10)); rp=${REPLY:+ $REPLY}
+    put "$name" 1 "${LABEL}${name}${RST}$rp ${ptx}${tail}"
+    put "$name" 2 "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
 }
 ((rl5_reset > 0)) && rate_seg 5h "$rl5" "$rl5_reset" 18000
 ((rl7_reset > 0)) && rate_seg 7d "$rl7" "$rl7_reset" 604800

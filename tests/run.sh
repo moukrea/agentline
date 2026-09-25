@@ -51,6 +51,24 @@ for fx in "$ROOT"/tests/fixtures/*.json; do
     done
 done
 
+for cs in ramp minibar pie braille percent; do
+    for es in ramp dots bars squares text; do
+        for ue in rainbow violet plain; do
+            for cols in 60 100 160; do
+                out=$(jq --arg tr "$ROOT/tests/fixtures/ultra-transcript.jsonl" '.transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
+                    | AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=nerd AGENTLINE_COMPACT_STYLE=$cs AGENTLINE_EFFORT_STYLE=$es \
+                      AGENTLINE_ULTRA_EFFECT=$ue COLUMNS=$cols bash "$ROOT/claude/statusline.sh" 2>"$TMP/err")
+                max=$(printf '%s\n' "$out" | width | sort -n | tail -1)
+                CHECK_NAME="styles $cs/$es/$ue @$cols: clean and fits ($max)"
+                check test -z "$(cat "$TMP/err")" -a "$max" -le $((cols - 4))
+            done
+        done
+    done
+done
+seg=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_SEGMENTS="dir ctx" COLUMNS=160 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="segments: hidden parts are gone"; check test "$(grep -c 'Opus\|5h\|cache' <<<"$seg")" -eq 0
+CHECK_NAME="segments: shown parts stay"; check grep -q 'context' <<<"$seg"
+
 ultra=$(jq --arg tr "$ROOT/tests/fixtures/ultra-transcript.jsonl" '.transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
     | AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="ultracode detected from the transcript"; check grep -q 'ultracode' <<<"$ultra"
@@ -145,16 +163,20 @@ benv=(env HOME="$BH/home" XDG_CONFIG_HOME="$BH/home/.config" XDG_DATA_HOME="$BH/
 mkdir -p "$TMP/pkg/agentline-test"
 cp -R "$ROOT"/{install.sh,VERSION,README.md,LICENSE,claude,codex,lib,bin} "$TMP/pkg/agentline-test/"
 tar czf "$TMP/release.tar.gz" -C "$TMP/pkg" agentline-test
-printf '1\n1\n1\n2\nn\ny\n' > "$TMP/answers"   # nerd, capsule, octicon, mdi-history, no auto-update, keep
+# Keys for the assistant: ↓ → on each setting, then hide "Session name", Enter.
+D=$'\e[B' R=$'\e[C' L=$'\e[D'
+printf '%s' "$D$R" "$D$L" "$D$R" "$D$R" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " $'\n' > "$TMP/answers"
 (cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" AGENTLINE_TTY="$TMP/answers" COLUMNS=100 \
     bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1)
 CHECK_NAME="bootstrap: exit 0"; check test $? -eq 0
 conf="$BH/home/.config/agentline/config"
-CHECK_NAME="assistant: glyphs saved"; check grep -qx 'AGENTLINE_GLYPHS=nerd' "$conf"
-CHECK_NAME="assistant: bar saved"; check grep -qx 'AGENTLINE_BAR=capsule' "$conf"
-CHECK_NAME="assistant: reset icon saved"; check grep -qx 'AGENTLINE_RESET_ICON=mdi-history' "$conf"
-CHECK_NAME="assistant: auto-update saved"; check grep -qx 'AGENTLINE_AUTO_UPDATE=0' "$conf"
-CHECK_NAME="assistant: previews rendered"; check grep -q 'Braille' "$TMP/boot.log"
+for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=minibar EFFORT_STYLE=dots ULTRA_EFFECT=violet \
+          BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0; do
+    CHECK_NAME="assistant: $kv saved"; check grep -qx "AGENTLINE_$kv" "$conf"
+done
+CHECK_NAME="assistant: session name hidden"
+check grep -qx 'AGENTLINE_SEGMENTS="dir git meta model effort ctx 5h 7d cache cost lines"' "$conf"
+CHECK_NAME="assistant: preview drawn"; check grep -q 'Preview' "$TMP/boot.log"
 CHECK_NAME="bootstrap: agentline command"; check test -x "$BH/home/.local/bin/agentline"
 CHECK_NAME="bootstrap: statusLine set"; check grep -q 'agentline/claude-statusline.sh' "$BH/home/.claude/settings.json"
 sumA=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)

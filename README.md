@@ -47,10 +47,20 @@ Requirements: bash 5, `jq`, `git`, `curl`.
 curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash
 ```
 
-The first install opens a setup assistant in the terminal: glyphs, progress bars,
-branch and reset icons, automatic updates. Every choice is previewed with the real
-status line on a sample session, so you see how your font draws it before picking.
-Then it installs for Claude Code and Codex, whichever are on the machine.
+The first install opens a full-screen setup assistant. At the top, a live preview:
+the real status line, drawn from your last Claude Code session (a sample one on a
+fresh machine), at your terminal's exact width. It re-renders on every change, every
+second (animations run) and when you resize the window, so you see the responsive
+layout at work. "Preview as" switches the preview to ultracode, near-the-limits or a
+cold prompt cache. Below, with ↑↓ ←→ and space:
+
+- glyphs, progress bars, compact gauges (narrow terminals), effort gauge,
+  ultracode effect, branch and reset icons, automatic updates;
+- which parts Claude Code shows (directory, git, session name, model, effort,
+  context, limits, cache, cost, edits…);
+- which items Codex shows.
+
+Enter saves and installs for Claude Code and Codex, whichever are on the machine.
 
 Non-interactive (CI, dotfiles), with options passed through `bash -s --`:
 
@@ -139,6 +149,11 @@ Environment variables with the same names override it.
 | `AGENTLINE_BRANCH_ICON` | `auto`, `unicode` `⎇`, `octicon`, `powerline`, `devicon` | `auto` |
 | `AGENTLINE_RESET_ICON` | `auto`, `unicode` `↻`, `octicon` (history), `mdi-history`, `mdi-progress-clock`, `mdi-refresh` | `auto` |
 | `AGENTLINE_PATH_COLOR` | `R;G;B` | `215;119;87` (Claude Code's accent) |
+| `AGENTLINE_COMPACT_STYLE` | gauge used when a terminal is too narrow for bars: `ramp` `▁▂▄▆█`, `minibar`, `pie` (Nerd circle slices, `◔◑◕` in Unicode), `braille`, `percent` | `ramp` |
+| `AGENTLINE_EFFORT_STYLE` | `ramp` `▁▂▄▆█`, `dots` `●●○○○`, `bars` `▰▰▱▱▱`, `squares` `■■□□□`, `text` (word only) | `ramp` |
+| `AGENTLINE_ULTRA_EFFECT` | `rainbow` (drifting gradient), `violet` (Claude Code's ultracode violet with a sweeping highlight), `plain` (static violet) | `rainbow` |
+| `AGENTLINE_SEGMENTS` | shown parts: `dir git session meta model effort ctx 5h 7d cache cost lines` | all |
+| `AGENTLINE_CODEX_ITEMS` | Codex items, in order (see `codex/preset`) | the preset |
 | `AGENTLINE_AUTO_UPDATE` | `1`, `0` | `1` |
 | `AGENTLINE_ICON_GAP` | `auto`, `0`, `1`: space after Nerd icons, which are often drawn wider than their cell | `auto` (on with Nerd glyphs) |
 
@@ -162,11 +177,11 @@ The Unicode set follows [Starship](https://starship.rs)'s conventions.
 ## Codex
 
 Codex has no external status line command: its `tui.status_line` setting is a list
-of items Codex draws itself, so custom glyphs, bars and colours are not possible
-there. The installer sets the closest preset (model and reasoning, directory, git
-branch, context used, 5-hour and weekly limits, estimated cost) and
-`status_line_use_colors = true`. Edit `codex/preset` and re-run the installer to
-change it; the file lists every available item.
+of items Codex draws itself, so custom glyphs, bars, colours and layout are not
+possible there. What you can choose is which items it shows and in what order: the
+assistant lists all of them (default: model and reasoning, directory, git branch,
+context used, 5-hour and weekly limits, estimated cost), or set
+`AGENTLINE_CODEX_ITEMS`. `status_line_use_colors = true` is set as well.
 
 The installer only touches the two keys it manages in `[tui]` (tagged
 `# agentline`). A `status_line` of yours is commented out, not deleted, and
