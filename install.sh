@@ -20,7 +20,33 @@ CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 TAG='# agentline'
 
+FONTS_URL="https://github.com/$REPO/blob/main/docs/fonts.md"
 die() { echo "agentline: $*" >&2; exit 1; }
+
+# Is a Nerd Font installed? (AGENTLINE_ASSUME_NERD=1/0 overrides, for tests.)
+have_nerd_font() {
+    if [ -n "${AGENTLINE_ASSUME_NERD:-}" ]; then [ "$AGENTLINE_ASSUME_NERD" = 1 ]; return; fi
+    if command -v fc-list >/dev/null 2>&1 && fc-list : family 2>/dev/null | grep -qi 'nerd font'; then return 0; fi
+    local d
+    for d in "$HOME/Library/Fonts" /Library/Fonts "$HOME/.local/share/fonts" "$HOME/.fonts"; do
+        [ -d "$d" ] && [ -n "$(find "$d" -iname '*nerd*' -print -quit 2>/dev/null)" ] && return 0
+    done
+    return 1
+}
+
+# Codex items closest to the Claude Code segments shown (the "mirror" option).
+mirror_items() { # mirror_items "<segments>" → stdout, space-separated
+    local s=" $1 " out=""
+    [[ $s == *" model "* ]] && out+="model-with-reasoning " || { [[ $s == *" effort "* ]] && out+="reasoning "; }
+    [[ $s == *" dir "* ]] && out+="current-dir "
+    [[ $s == *" git "* ]] && out+="git-branch "
+    [[ $s == *" session "* ]] && out+="thread-title "
+    [[ $s == *" ctx "* ]] && out+="context-used "
+    [[ $s == *" 5h "* ]] && out+="five-hour-limit "
+    [[ $s == *" 7d "* ]] && out+="weekly-limit "
+    [[ $s == *" cost "* ]] && out+="estimated-thread-cost "
+    echo "${out% }"
+}
 
 # fetch_source <dir>: put the agentline sources in <dir>. $AGENTLINE_SOURCE (a
 # directory or .tar.gz) wins, then $AGENTLINE_REF, then the latest release.
@@ -58,14 +84,16 @@ Targets (default: the agents installed last time, else every agent found)
 
 Options
   --configure           Run the setup assistant (it also runs on first install)
-  --glyphs SET          unicode | nerd  (Nerd needs a Nerd Font, see README)
-  --bar STYLE           blocks | smooth | line | segments | braille | capsule
+  --glyphs SET          nerd (default, needs a Nerd Font, see README) | unicode
+  --bar STYLE           context / 5h / 7d bars; STYLE is one of: capsule (default) smooth
+                        blocks line segments braille ramp dots bars squares pie none
   --branch-icon ICON    auto | unicode | octicon | powerline | devicon
   --reset-icon ICON     auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
-  --effort-style S      ramp | dots | bars | squares | text
-  --compact-style S     ramp | minibar | pie | braille | percent  (gauges on narrow terminals)
+  --effort-style STYLE  effort gauge, same styles (default: ramp)
+  --compact-style STYLE gauges on narrow terminals, same styles (default: ramp)
   --ultra-effect E      rainbow | violet | plain
   --segments "LIST"     Shown parts, among: dir git session meta model effort ctx 5h 7d cache cost lines
+  --codex-mirror on|off Codex shows the items closest to the Claude Code parts shown
   --auto-update on|off  One background update check a day
   --update              Install the latest release if it is newer (--force: always)
   --yes                 Never ask; keep the saved configuration
@@ -91,13 +119,14 @@ while [ $# -gt 0 ]; do
         --codex) do_codex=1 ;;
         --configure) configure=1 ;;
         --glyphs) choice "$1" "${2-}" unicode nerd; SET[GLYPHS]=$2; shift ;;
-        --bar) choice "$1" "${2-}" blocks smooth line segments braille capsule; SET[BAR]=$2; shift ;;
+        --bar) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[BAR]=$2; shift ;;
         --branch-icon) choice "$1" "${2-}" auto unicode octicon powerline devicon; SET[BRANCH_ICON]=$2; shift ;;
         --reset-icon) choice "$1" "${2-}" auto unicode octicon mdi-history mdi-progress-clock mdi-refresh; SET[RESET_ICON]=$2; shift ;;
-        --effort-style) choice "$1" "${2-}" ramp dots bars squares text; SET[EFFORT_STYLE]=$2; shift ;;
-        --compact-style) choice "$1" "${2-}" ramp minibar pie braille percent; SET[COMPACT_STYLE]=$2; shift ;;
+        --effort-style) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[EFFORT_STYLE]=$2; shift ;;
+        --compact-style) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[COMPACT_STYLE]=$2; shift ;;
         --ultra-effect) choice "$1" "${2-}" rainbow violet plain; SET[ULTRA_EFFECT]=$2; shift ;;
         --segments) SET[SEGMENTS]=${2-}; shift ;;
+        --codex-mirror) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[CODEX_MIRROR]=1 || SET[CODEX_MIRROR]=0; shift ;;
         --auto-update) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[AUTO_UPDATE]=1 || SET[AUTO_UPDATE]=0; shift ;;
         --update) update=1 ;;
         --force) force=1 ;;
@@ -202,8 +231,12 @@ claude_uninstall() {
 # yours is commented out as "# agentline-replaced: …" and restored on removal.
 codex_render() { # codex_render install|uninstall < config.toml > config.toml
     local items
-    local list
-    list=$(sed -n 's/^AGENTLINE_CODEX_ITEMS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF" 2>/dev/null)
+    local list=""
+    if grep -qx 'AGENTLINE_CODEX_MIRROR=1' "$CONF" 2>/dev/null; then
+        list=$(mirror_items "$(sed -n 's/^AGENTLINE_SEGMENTS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF")")
+        [ -n "$list" ] || grep -q '^AGENTLINE_SEGMENTS=' "$CONF" || list=$(mirror_items "dir git session meta model effort ctx 5h 7d cache cost lines")
+    fi
+    [ -n "$list" ] || list=$(sed -n 's/^AGENTLINE_CODEX_ITEMS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF" 2>/dev/null)
     [ -n "$list" ] || list=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
     items=$(printf '%s\n' $list | sed 's/.*/"&"/' | paste -sd, - | sed 's/,/, /g')
     awk -v mode="$1" -v tag="$TAG" -v items="$items" '
@@ -301,14 +334,17 @@ sources_install() {
 config_apply() {
     mkdir -p "$CONF_DIR"
     if [ ! -f "$CONF" ]; then
-        cat > "$CONF" <<'EOF'
+        local glyphs=unicode bar=smooth
+        have_nerd_font && glyphs=nerd bar=capsule
+        cat > "$CONF" <<EOF
 # agentline configuration: shell syntax, read on every render.
-# Change it with `agentline configure`, or edit it (values: `agentline --help`).
+# Change it with \`agentline configure\`, or edit it (values: \`agentline --help\`).
 # Environment variables with the same names override this file.
-AGENTLINE_GLYPHS=unicode
-AGENTLINE_BAR=blocks
+AGENTLINE_GLYPHS=$glyphs
+AGENTLINE_BAR=$bar
 AGENTLINE_BRANCH_ICON=auto
 AGENTLINE_RESET_ICON=auto
+AGENTLINE_CODEX_MIRROR=1
 AGENTLINE_AUTO_UPDATE=1
 EOF
         ok "config → $CONF"
@@ -356,7 +392,7 @@ rc=0
 ((do_codex)) && { codex_install || rc=1; }
 { ((do_claude)) && echo claude; ((do_codex)) && echo codex; } > "$DATA/targets"
 [ -n "${AGENTLINE_FETCHED:-}" ] && [ "$AGENTLINE_FETCHED" != "$DATA/current" ] && rm -rf "$AGENTLINE_FETCHED"
-if ((!quiet)) && grep -q '^AGENTLINE_GLYPHS=nerd' "$CONF"; then
-    echo "Nerd glyphs are on: use JuliaMono with Symbols Nerd Font Mono as fallback (see README)."
+if ((!quiet)) && grep -q '^AGENTLINE_GLYPHS=nerd' "$CONF" && ! have_nerd_font; then
+    printf 'Nerd glyphs are on but no Nerd Font was found: \e]8;;%s\e\\install one\e]8;;\e\\ (%s)\n' "$FONTS_URL" "$FONTS_URL"
 fi
 exit $rc

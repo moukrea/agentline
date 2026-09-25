@@ -10,7 +10,7 @@
 WIZ_ROWS=() WIZ_TYPE=() WIZ_KEY=() WIZ_OPTS=()   # parallel arrays, one entry per row
 declare -A WIZ_VAL
 
-wiz_row() { # wiz_row <type: choice|toggle|codex|header> <key> <label> [options...]
+wiz_row() { # wiz_row <type: choice|toggle|codex|fold|header|note> <key> <label> [options...]
     WIZ_TYPE+=("$1"); WIZ_KEY+=("$2"); WIZ_ROWS+=("$3"); shift 3; WIZ_OPTS+=("$*")
 }
 
@@ -18,9 +18,12 @@ wiz_setup_rows() {
     wiz_row choice SCENARIO "Preview as" session ultracode limits cold
     wiz_row header "" "Look"
     wiz_row choice GLYPHS "Glyphs" nerd unicode
-    wiz_row choice BAR "Progress bars" capsule smooth blocks line segments braille
-    wiz_row choice COMPACT_STYLE "Compact gauges (narrow)" ramp minibar pie braille percent
-    wiz_row choice EFFORT_STYLE "Effort gauge" ramp dots bars squares text
+    if ((!WIZ_HAVE_NERD)); then
+        wiz_row note "" "No Nerd Font found on this machine: Nerd icons need one. "$'\e]8;;'"$FONTS_URL"$'\e\\'"Font guide"$'\e]8;;\e\\'" ($FONTS_URL)"
+    fi
+    wiz_row choice BAR "Bars (context, 5h, 7d)" capsule smooth blocks line segments braille ramp dots bars squares pie none
+    wiz_row choice COMPACT_STYLE "Compact gauges (narrow)" capsule smooth blocks line segments braille ramp dots bars squares pie none
+    wiz_row choice EFFORT_STYLE "Effort gauge" capsule smooth blocks line segments braille ramp dots bars squares pie none
     wiz_row choice ULTRA_EFFECT "Ultracode effect" rainbow violet plain
     wiz_row choice BRANCH_ICON "Branch icon" octicon powerline devicon unicode
     wiz_row choice RESET_ICON "Reset-time icon" octicon mdi-history mdi-progress-clock mdi-refresh unicode
@@ -33,7 +36,9 @@ wiz_setup_rows() {
         wiz_row toggle "${seg%%|*}" "${seg#*|}"
     done
     if ((do_codex)); then
-        wiz_row header "" "Codex: items (Codex draws them itself, so no custom glyphs there)"
+        wiz_row header "" "Codex (it draws its own line: only its items can be chosen)"
+        wiz_row choice CODEX_MIRROR "Mirror Claude Code" 1 0
+        wiz_row fold CODEX_OPEN "Items"
         for seg in $(sed -n '/^# Available:/,/^[^#]/p' "$SRC/codex/preset" | grep '^#' | sed 's/^# *//; s/^Available://' | tr ',' ' '); do
             wiz_row codex "$seg" "$seg"
         done
@@ -44,8 +49,8 @@ label_of() { # human label of an option value → REPLY
     case $1 in
         1) REPLY=on ;; 0) REPLY=off ;; session) REPLY="your last session" ;; ultracode) REPLY=ultracode ;;
         limits) REPLY="near the limits" ;; cold) REPLY="cold prompt cache" ;; ramp) REPLY="ramp ▁▂▄▆█" ;;
-        minibar) REPLY="mini bar" ;; pie) REPLY="pie ◔" ;; braille) REPLY="braille ⣿" ;; percent) REPLY="percentage only" ;;
-        dots) REPLY="dots ●●○" ;; bars) REPLY="bars ▰▰▱" ;; squares) REPLY="squares ■■□" ;; text) REPLY="word only" ;;
+        pie) REPLY="pie ◔" ;; braille) REPLY="braille ⣿⣶⣀" ;; none) REPLY="none (value only)" ;;
+        dots) REPLY="dots ●●○" ;; bars) REPLY="bars ▰▰▱" ;; squares) REPLY="squares ■■□" ;;
         capsule) REPLY="capsule (Nerd)" ;; blocks) REPLY="blocks █▒░" ;; line) REPLY="line ━╸─" ;;
         segments) REPLY="segments ■□" ;; smooth) REPLY="smooth" ;; nerd) REPLY="Nerd Font icons" ;;
         unicode) REPLY="Unicode" ;; rainbow) REPLY="rainbow" ;; violet) REPLY="Claude violet, sweeping highlight" ;;
@@ -54,22 +59,26 @@ label_of() { # human label of an option value → REPLY
     esac
 }
 
-# The session the preview renders: your last Claude Code session if any.
-wiz_base() { # → WIZ_BASE, WIZ_DEMO, WIZ_SOURCE (not in a subshell)
-    local base="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID/last-payload.json"
-    WIZ_DEMO="" WIZ_SOURCE="your last Claude Code session"
-    if [ ! -s "$base" ] || ! jq -e . "$base" >/dev/null 2>&1; then
-        base="$WIZ_TMP/sample.json"
-        jq --arg home "$HOME" --argjson n "$EPOCHSECONDS" '.cwd |= sub("^HOME"; $home) | .workspace.current_dir = .cwd
-            | .prompt_cache.expires_at = $n + .prompt_cache.expires_at | (.rate_limits[].resets_at) |= $n + .' \
-            "$SRC/lib/sample.json" > "$base"
-        WIZ_DEMO="feat/billing-export 2 1 3 1 0 0" WIZ_SOURCE="sample session"
+# The session the preview renders, taken once when the assistant opens (so only
+# the animation moves): your last Claude Code session if any, else a sample. The
+# directory is the one you run the assistant from, with its real git state, or a
+# simulated repository when it is not one.
+wiz_snapshot() {
+    local last="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID/last-payload.json"
+    WIZ_BASE="$WIZ_TMP/base.json" WIZ_SOURCE="your last Claude Code session"
+    if [ -s "$last" ] && jq -e . "$last" >/dev/null 2>&1; then cp "$last" "$WIZ_BASE"
+    else
+        WIZ_SOURCE="sample session"
+        jq --argjson n "$EPOCHSECONDS" '.prompt_cache.expires_at = $n + .prompt_cache.expires_at
+            | (.rate_limits[].resets_at) |= $n + .' "$SRC/lib/sample.json" > "$WIZ_BASE"
     fi
-    WIZ_BASE=$base
+    jq --arg d "$PWD" '.cwd = $d | .workspace.current_dir = $d | .workspace.project_dir = $d' "$WIZ_BASE" > "$WIZ_BASE.tmp" && mv "$WIZ_BASE.tmp" "$WIZ_BASE"
+    if git -C "$PWD" rev-parse --git-dir >/dev/null 2>&1; then WIZ_DEMO=""
+    else WIZ_DEMO="feat/billing-export 2 1 3 1 0 0"; WIZ_SOURCE+=", simulated git"; fi
 }
-wiz_payload() { # the session, adjusted to the "Preview as" scenario
+wiz_payload() { # the session, adjusted to the scenario → stdout
     local base=$WIZ_BASE tr="$WIZ_TMP/ultra.jsonl"
-    case ${WIZ_VAL[SCENARIO]} in
+    case $WIZ_SCENARIO in
         ultracode) jq --arg tr "$tr" '.session_id = "agentline-wizard-ultra" | .effort.level = "xhigh" | .transcript_path = $tr' "$base" ;;
         limits) jq --argjson n "$EPOCHSECONDS" '.session_id = "agentline-wizard"
             | .context_window.context_window_size = (.context_window.context_window_size // 200000)
@@ -91,28 +100,70 @@ wiz_list() { # wiz_list <toggle|codex> → space-separated enabled keys
     REPLY=${out% }
 }
 
+# Widest width at which this session's second line switches to compact gauges
+# (found by rendering with and without them), cached per situation.
+wiz_compact_width() {
+    local payload=$1 key w a b env=(AGENTLINE_CONFIG=/dev/null)
+    wiz_list toggle; env+=(AGENTLINE_SEGMENTS="$REPLY")
+    for k in GLYPHS BAR BRANCH_ICON RESET_ICON; do env+=("AGENTLINE_$k=${WIZ_VAL[$k]}"); done
+    [ -n "$WIZ_DEMO" ] && env+=("AGENTLINE_DEMO_GIT=$WIZ_DEMO")
+    key="$WIZ_COLS|$WIZ_SCENARIO|${env[*]}"
+    if [ "$key" != "${WIZ_CW_KEY:-}" ]; then
+        WIZ_CW_KEY=$key WIZ_CW=$WIZ_COLS
+        differs() { # does <width> show compact gauges on the second line?
+            a=$(env "${env[@]}" COLUMNS=$1 AGENTLINE_COMPACT_STYLE=none bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
+            b=$(env "${env[@]}" COLUMNS=$1 AGENTLINE_COMPACT_STYLE=dots bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
+            [ "${a#*$'\n'}" != "${b#*$'\n'}" ]
+        }
+        if differs 40; then   # binary search for the widest such width
+            local lo=40 hi=$WIZ_COLS mid
+            while ((lo < hi)); do mid=$(((lo + hi + 1) / 2)); if differs "$mid"; then lo=$mid; else hi=$((mid - 1)); fi; done
+            WIZ_CW=$lo
+        fi
+    fi
+    REPLY=$WIZ_CW
+}
+
 wiz_render_preview() { # → WIZ_PREVIEW (two lines)
     local k payload env
-    wiz_base; payload=$(wiz_payload)
+    # The row under the cursor can call for a situation: ultracode for its
+    # effect, a narrow terminal for the compact gauges.
+    WIZ_SCENARIO=${WIZ_VAL[SCENARIO]} WIZ_WIDTH=$WIZ_COLS WIZ_NOTE=""
+    case ${WIZ_KEY[WIZ_CUR]} in
+        ULTRA_EFFECT) WIZ_SCENARIO=ultracode; WIZ_NOTE=" · showing ultracode" ;;
+        COMPACT_STYLE) WIZ_WIDTH=-1 ;;
+    esac
+    payload=$(wiz_payload)
+    if ((WIZ_WIDTH < 0)); then wiz_compact_width "$payload"; WIZ_WIDTH=$REPLY
+        ((WIZ_WIDTH < WIZ_COLS)) && WIZ_NOTE=" · narrowed to show the compact gauges"; fi
     wiz_list toggle
-    env=(AGENTLINE_CONFIG=/dev/null COLUMNS="$WIZ_COLS" AGENTLINE_SEGMENTS="$REPLY")
+    env=(AGENTLINE_CONFIG=/dev/null COLUMNS="$WIZ_WIDTH" AGENTLINE_SEGMENTS="$REPLY")
     for k in GLYPHS BAR COMPACT_STYLE EFFORT_STYLE ULTRA_EFFECT BRANCH_ICON RESET_ICON; do env+=("AGENTLINE_$k=${WIZ_VAL[$k]}"); done
     [ -n "$WIZ_DEMO" ] && env+=("AGENTLINE_DEMO_GIT=$WIZ_DEMO")
     WIZ_PREVIEW=$(env "${env[@]}" bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
 }
 
 wiz_draw() {
-    local top row line val sel avail buf=$'\e[H'
+    local top row line val sel avail k buf=$'\e[H'
     buf+=$'\e[1m agentline setup\e[0m\e[2m   ↑↓ move · ←→ change · space show/hide · enter save · q quit\e[K\e[0m\n\e[K\n'
-    buf+=$'\e[2m Preview · '"$WIZ_SOURCE · $WIZ_COLS columns"$'\e[K\e[0m\n'
-    buf+="  ${WIZ_PREVIEW%%$'\n'*}"$'\e[0m\e[K\n'"  ${WIZ_PREVIEW#*$'\n'}"$'\e[0m\e[K\n\e[K\n'
-    # Scroll the settings so the cursor stays visible.
-    avail=$((WIZ_LINES - 7)); ((avail < 5)) && avail=5
-    top=$((WIZ_CUR - avail / 2)); ((top > ${#WIZ_ROWS[@]} - avail)) && top=$((${#WIZ_ROWS[@]} - avail)); ((top < 0)) && top=0
-    for ((row = top; row < top + avail && row < ${#WIZ_ROWS[@]}; row++)); do
+    buf+=$'\e[2m Preview · '"$WIZ_SOURCE · $WIZ_WIDTH columns$WIZ_NOTE"$'\e[K\e[0m\n'
+    buf+="  ${WIZ_PREVIEW%%$'\n'*}"$'\e[0m\e[K\n'"  ${WIZ_PREVIEW#*$'\n'}"$'\e[0m\e[K\n'
+    if ((do_codex)); then wiz_list codex; buf+=$'\e[2m  Codex: '"${REPLY// / · }"$'\e[0m\e[K\n'; fi
+    buf+=$'\e[K\n'
+    # Scroll the visible settings so the cursor stays on screen.
+    local vis=() pos=0 j
+    for row in "${!WIZ_ROWS[@]}"; do wiz_visible "$row" && { ((row == WIZ_CUR)) && pos=${#vis[@]}; vis+=("$row"); }; done
+    avail=$((WIZ_LINES - 8)); ((avail < 5)) && avail=5
+    top=$((pos - avail / 2)); ((top > ${#vis[@]} - avail)) && top=$((${#vis[@]} - avail)); ((top < 0)) && top=0
+    for ((j = top; j < top + avail && j < ${#vis[@]}; j++)); do
+        row=${vis[j]}
         sel=" "; ((row == WIZ_CUR)) && sel=$'\e[36m›\e[0m'
         case ${WIZ_TYPE[row]} in
             header) line=$'\e[1;2m  '"${WIZ_ROWS[row]}"$'\e[0m' ;;
+            note)   line=$'   \e[33m'"${WIZ_ROWS[row]}"$'\e[0m' ;;
+            fold)   wiz_list codex; val=$REPLY; ((${#val} > 60)) && val="${val:0:59}…"
+                    [ "${WIZ_VAL[CODEX_OPEN]}" = 1 ] && k="▾" || k="▸"
+                    line=" $sel $k ${WIZ_ROWS[row]}  "$'\e[2m'"${val// / · }"$'\e[0m' ;;
             choice) label_of "${WIZ_VAL[${WIZ_KEY[row]}]}"
                     printf -v line ' %s %-26s \e[36m‹\e[0m %s \e[36m›\e[0m' "$sel" "${WIZ_ROWS[row]}" "$REPLY" ;;
             toggle|codex)
@@ -126,29 +177,46 @@ wiz_draw() {
     printf '%s\e[J' "$buf"
 }
 
-wiz_move() { # skip headers
-    local d=$1 n=${#WIZ_ROWS[@]}
-    WIZ_CUR=$(((WIZ_CUR + d + n) % n))
-    [ "${WIZ_TYPE[WIZ_CUR]}" = header ] && WIZ_CUR=$(((WIZ_CUR + d + n) % n))
+wiz_visible() { # wiz_visible <row>: Codex items only when their fold is open
+    [ "${WIZ_TYPE[$1]}" != codex ] || [ "${WIZ_VAL[CODEX_OPEN]}" = 1 ]
+}
+wiz_move() { # to the next visible, selectable row
+    local d=$1 n=${#WIZ_ROWS[@]} i
+    for ((i = 0; i < n; i++)); do
+        WIZ_CUR=$(((WIZ_CUR + d + n) % n))
+        case ${WIZ_TYPE[WIZ_CUR]} in header|note) continue ;; esac
+        wiz_visible "$WIZ_CUR" && break
+    done
     return 0
 }
+wiz_mirror() { # tick the Codex items closest to the Claude Code parts shown
+    local i items
+    wiz_list toggle; items=" $(mirror_items "$REPLY") "
+    for i in "${!WIZ_TYPE[@]}"; do
+        [ "${WIZ_TYPE[i]}" = codex ] || continue
+        [[ $items == *" ${WIZ_KEY[i]} "* ]] && WIZ_VAL[codex:${WIZ_KEY[i]}]=1 || WIZ_VAL[codex:${WIZ_KEY[i]}]=0
+    done
+}
 wiz_change() { # cycle a choice or flip a toggle
-    local d=$1 key=${WIZ_KEY[WIZ_CUR]} opts i n
+    local d=$1 key=${WIZ_KEY[WIZ_CUR]} opts i n k
     case ${WIZ_TYPE[WIZ_CUR]} in
         toggle) [ "${WIZ_VAL[$key]}" = 1 ] && WIZ_VAL[$key]=0 || WIZ_VAL[$key]=1 ;;
-        codex) [ "${WIZ_VAL[codex:$key]}" = 1 ] && WIZ_VAL[codex:$key]=0 || WIZ_VAL[codex:$key]=1 ;;
+        codex) [ "${WIZ_VAL[codex:$key]}" = 1 ] && WIZ_VAL[codex:$key]=0 || WIZ_VAL[codex:$key]=1
+               WIZ_VAL[CODEX_MIRROR]=0 ;;   # picking items by hand ends mirroring
+        fold) [ "${WIZ_VAL[$key]}" = 1 ] && WIZ_VAL[$key]=0 || WIZ_VAL[$key]=1 ;;
         choice)
             read -ra opts <<<"${WIZ_OPTS[WIZ_CUR]}"; n=${#opts[@]}
             for i in "${!opts[@]}"; do [ "${opts[i]}" = "${WIZ_VAL[$key]}" ] && break; done
             WIZ_VAL[$key]=${opts[(i + d + n) % n]}
             # Nerd-only options follow the glyph set.
             if [ "${WIZ_VAL[GLYPHS]}" = unicode ]; then
-                [ "${WIZ_VAL[BAR]}" = capsule ] && WIZ_VAL[BAR]=smooth
+                for k in BAR COMPACT_STYLE EFFORT_STYLE; do [ "${WIZ_VAL[$k]}" = capsule ] && WIZ_VAL[$k]=smooth; done
                 WIZ_VAL[BRANCH_ICON]=unicode WIZ_VAL[RESET_ICON]=unicode
             elif [ "$key" = GLYPHS ]; then
                 WIZ_VAL[BRANCH_ICON]=octicon WIZ_VAL[RESET_ICON]=octicon
             fi ;;
     esac
+    [ "${WIZ_VAL[CODEX_MIRROR]:-0}" = 1 ] && wiz_mirror
     return 0
 }
 
@@ -164,18 +232,27 @@ wizard() {
     local k v key rest rc saved=0 resized=0 stty_saved=""
     WIZ_TMP=$(mktemp -d)
     printf '%s\n' '{"type":"attachment","attachment":{"type":"ultra_effort_enter"}}' > "$WIZ_TMP/ultra.jsonl"
-    wiz_setup_rows
     # Defaults, then the saved configuration.
-    WIZ_VAL=([SCENARIO]=session [GLYPHS]=unicode [BAR]=blocks [COMPACT_STYLE]=ramp [EFFORT_STYLE]=ramp
-             [ULTRA_EFFECT]=rainbow [BRANCH_ICON]=unicode [RESET_ICON]=unicode [AUTO_UPDATE]=1)
+    # The maintainer's setup when a Nerd Font is installed, safe glyphs otherwise.
+    WIZ_HAVE_NERD=0; have_nerd_font && WIZ_HAVE_NERD=1
+    if ((WIZ_HAVE_NERD)); then
+        WIZ_VAL=([GLYPHS]=nerd [BAR]=capsule [BRANCH_ICON]=octicon [RESET_ICON]=octicon)
+    else
+        WIZ_VAL=([GLYPHS]=unicode [BAR]=smooth [BRANCH_ICON]=unicode [RESET_ICON]=unicode)
+    fi
+    WIZ_VAL+=([SCENARIO]=session [COMPACT_STYLE]=ramp [EFFORT_STYLE]=ramp [ULTRA_EFFECT]=rainbow
+              [AUTO_UPDATE]=1 [CODEX_MIRROR]=1 [CODEX_OPEN]=0)
     local AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines" AGENTLINE_CODEX_ITEMS=""
     local AGENTLINE_GLYPHS="" AGENTLINE_BAR="" AGENTLINE_COMPACT_STYLE="" AGENTLINE_EFFORT_STYLE="" AGENTLINE_ULTRA_EFFECT=""
-    local AGENTLINE_BRANCH_ICON="" AGENTLINE_RESET_ICON="" AGENTLINE_AUTO_UPDATE=""
+    local AGENTLINE_BRANCH_ICON="" AGENTLINE_RESET_ICON="" AGENTLINE_AUTO_UPDATE="" AGENTLINE_CODEX_MIRROR=""
     # shellcheck source=/dev/null
     [ -r "$CONF" ] && . "$CONF"
-    for k in GLYPHS BAR COMPACT_STYLE EFFORT_STYLE ULTRA_EFFECT BRANCH_ICON RESET_ICON AUTO_UPDATE; do
+    for k in GLYPHS BAR COMPACT_STYLE EFFORT_STYLE ULTRA_EFFECT BRANCH_ICON RESET_ICON AUTO_UPDATE CODEX_MIRROR; do
         v="AGENTLINE_$k"; [ -n "${!v:-}" ] && WIZ_VAL[$k]=${!v}
     done
+    wiz_setup_rows
+    [ "${WIZ_VAL[COMPACT_STYLE]}" = minibar ] && WIZ_VAL[COMPACT_STYLE]=${WIZ_VAL[BAR]}
+    for k in BAR COMPACT_STYLE EFFORT_STYLE; do case ${WIZ_VAL[$k]} in text|percent) WIZ_VAL[$k]=none ;; esac; done
     for k in BRANCH_ICON RESET_ICON; do
         [ "${WIZ_VAL[$k]}" = auto ] && { [ "${WIZ_VAL[GLYPHS]}" = nerd ] && WIZ_VAL[$k]=octicon || WIZ_VAL[$k]=unicode; }
     done
@@ -183,6 +260,7 @@ wizard() {
         [[ " $AGENTLINE_SEGMENTS " == *" $k "* ]] && WIZ_VAL[$k]=1 || WIZ_VAL[$k]=0
     done
     [ -n "$AGENTLINE_CODEX_ITEMS" ] || AGENTLINE_CODEX_ITEMS=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
+    [ "${WIZ_VAL[CODEX_MIRROR]}" = 1 ] && AGENTLINE_CODEX_ITEMS=$(mirror_items "$AGENTLINE_SEGMENTS")
     for k in "${!WIZ_TYPE[@]}"; do
         [ "${WIZ_TYPE[k]}" = codex ] || continue
         [[ " $AGENTLINE_CODEX_ITEMS " == *" ${WIZ_KEY[k]} "* ]] && WIZ_VAL[codex:${WIZ_KEY[k]}]=1 || WIZ_VAL[codex:${WIZ_KEY[k]}]=0
@@ -193,7 +271,7 @@ wizard() {
     printf '\e[?1049h\e[?25l'
     trap 'resized=1' WINCH
     WIZ_CUR=0
-    wiz_size; wiz_render_preview; wiz_draw
+    wiz_snapshot; wiz_size; wiz_render_preview; wiz_draw
     while :; do
         key=""
         if IFS= read -rsn1 -t 1 -u 3 key; then :
@@ -222,6 +300,7 @@ wizard() {
     if ((!saved)); then echo "agentline: setup cancelled, nothing changed." >&2; exit 1; fi
     # shellcheck disable=SC2034  # SET belongs to install.sh
     for k in GLYPHS BAR COMPACT_STYLE EFFORT_STYLE ULTRA_EFFECT BRANCH_ICON RESET_ICON AUTO_UPDATE; do SET[$k]=${WIZ_VAL[$k]}; done
+    ((do_codex)) && SET[CODEX_MIRROR]=${WIZ_VAL[CODEX_MIRROR]}
     wiz_list toggle; SET[SEGMENTS]=$REPLY
     if ((do_codex)); then wiz_list codex; SET[CODEX_ITEMS]=$REPLY; fi
     return 0

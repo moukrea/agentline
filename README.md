@@ -49,16 +49,21 @@ curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh |
 
 The first install opens a full-screen setup assistant. At the top, a live preview:
 the real status line, drawn from your last Claude Code session (a sample one on a
-fresh machine), at your terminal's exact width. It re-renders on every change, every
+fresh machine) in the directory you run it from, with its real git state (simulated
+outside a repository), at your terminal's exact width. The session is read once, so
+only the animations move. It re-renders on every change, every
 second (animations run) and when you resize the window, so you see the responsive
 layout at work. "Preview as" switches the preview to ultracode, near-the-limits or a
-cold prompt cache. Below, with ↑↓ ←→ and space:
+cold prompt cache; the preview also narrows itself while you pick compact gauges and
+shows ultracode while you pick its effect. Defaults are Nerd icons and capsule bars
+when a Nerd Font is installed, Unicode otherwise, with a link to the font guide. Below, with ↑↓ ←→ and space:
 
 - glyphs, progress bars, compact gauges (narrow terminals), effort gauge,
   ultracode effect, branch and reset icons, automatic updates;
 - which parts Claude Code shows (directory, git, session name, model, effort,
   context, limits, cache, cost, edits…);
-- which items Codex shows.
+- for Codex, "Mirror Claude Code" (on by default) ticks the Codex items closest to
+  the parts shown on the Claude Code side; the item list folds out to pick by hand.
 
 Enter saves and installs for Claude Code and Codex, whichever are on the machine.
 
@@ -99,63 +104,38 @@ Your configuration is kept across updates. Turn it off with
 
 **Recommended: [JuliaMono](https://github.com/cormullion/juliamono), with
 [Symbols Nerd Font Mono](https://github.com/ryanoasis/nerd-fonts) as fallback.**
+JuliaMono is the only free monospace font that draws every symbol Claude Code uses;
+the Nerd symbols provide the icons. Both are free for any use (SIL OFL 1.1, MIT).
 
-Claude Code draws its interface with about 50 symbols (`⏺ ⎿ ⏵ ⏸ ✶ ✻ ✽ ✔ ✗ ⚠ ◉ ❯ …`).
-89 free monospace fonts were compared against those symbols and this status line.
-JuliaMono is the only one that covers all of them. Iosevka, Iosevka Term and Adwaita
-Mono miss one rarely used symbol (`⎯`). Popular fonts (JetBrains Mono, Fira Code,
-Cascadia, Hack, Meslo, Monaspace…) miss 9 or more, and your terminal draws those
-with whatever fallback font it finds.
-
-JuliaMono has no icons, so Nerd glyphs (`--glyphs nerd`) come from Symbols Nerd
-Font Mono. Both fonts are free for any use: JuliaMono is under the SIL Open Font
-License 1.1, the Nerd Fonts symbols under MIT (the icon sets inside are MIT,
-Apache 2.0, OFL or CC BY 4.0).
-
-Install them:
-
-```sh
-# macOS
-brew install --cask font-juliamono font-symbols-only-nerd-font
-
-# Linux
-mkdir -p ~/.local/share/fonts && cd ~/.local/share/fonts
-curl -fLO https://github.com/cormullion/juliamono/releases/latest/download/JuliaMono-ttf.tar.gz
-tar xzf JuliaMono-ttf.tar.gz && rm JuliaMono-ttf.tar.gz
-curl -fLO https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.tar.xz
-tar xJf NerdFontsSymbolsOnly.tar.xz SymbolsNerdFontMono-Regular.ttf && rm NerdFontsSymbolsOnly.tar.xz
-fc-cache -f
-```
-
-Then set JuliaMono as the terminal font, with Symbols Nerd Font Mono as fallback:
-
-| Terminal | Setting |
-|---|---|
-| Ghostty | `font-family = JuliaMono` then `font-family = Symbols Nerd Font Mono` |
-| kitty | `font_family JuliaMono` and `symbol_map U+E000-U+F8FF,U+F0000-U+FFFFD Symbols Nerd Font Mono` |
-| WezTerm | `font = wezterm.font_with_fallback { 'JuliaMono', 'Symbols Nerd Font Mono' }` |
-| Alacritty, GNOME Terminal, iTerm2 | JuliaMono; Nerd symbols come from the system's font fallback |
-| VS Code | `"terminal.integrated.fontFamily": "JuliaMono, 'Symbols Nerd Font Mono'"` |
+The installer uses Nerd icons and capsule bars when it finds a Nerd Font on the
+machine, and Unicode glyphs otherwise. Installation per system and terminal
+settings: **[docs/fonts.md](docs/fonts.md)**.
 
 ## Configuration
 
 `~/.config/agentline/config`, written by the installer and read on every render.
 Environment variables with the same names override it.
 
+The three gauges (bars, compact gauges, effort) share one catalogue of styles:
+`capsule` (rounded ends, Nerd), `smooth` (eighth-cell bar on a solid rail), `blocks`
+`█▒░`, `line` `━╸─`, `segments` `■□`, `braille` `⣿⣀`, `ramp` `▁▂▄▆█`, `dots` `●○`,
+`bars` `▰▱`, `squares` `■□`, `pie` (a single circle slice) and `none` (value only).
+
 | Variable | Values | Default |
 |---|---|---|
-| `AGENTLINE_GLYPHS` | `unicode`, `nerd` | `unicode` |
-| `AGENTLINE_BAR` | `blocks` `█▒░`, `smooth` (eighth-cell bar on a solid rail), `line` `━╸─`, `segments` `■□`, `braille` `⣿⣀`, `capsule` (smooth with rounded Nerd caps) | `blocks` |
+| `AGENTLINE_GLYPHS` | `nerd`, `unicode` | `nerd` when a Nerd Font is installed, else `unicode` |
+| `AGENTLINE_BAR` | context, 5h and 7d bars: any style | `capsule` with Nerd glyphs, else `smooth` |
+| `AGENTLINE_COMPACT_STYLE` | gauges when the terminal is too narrow for bars: any style | `ramp` |
+| `AGENTLINE_EFFORT_STYLE` | effort gauge: any style | `ramp` |
+| `AGENTLINE_ULTRA_EFFECT` | `rainbow` (drifting gradient), `violet` (Claude Code's ultracode violet with a sweeping highlight), `plain` (static violet); applies to the effort part only | `rainbow` |
 | `AGENTLINE_BRANCH_ICON` | `auto`, `unicode` `⎇`, `octicon`, `powerline`, `devicon` | `auto` |
 | `AGENTLINE_RESET_ICON` | `auto`, `unicode` `↻`, `octicon` (history), `mdi-history`, `mdi-progress-clock`, `mdi-refresh` | `auto` |
-| `AGENTLINE_PATH_COLOR` | `R;G;B` | `215;119;87` (Claude Code's accent) |
-| `AGENTLINE_COMPACT_STYLE` | gauge used when a terminal is too narrow for bars: `ramp` `▁▂▄▆█`, `minibar`, `pie` (Nerd circle slices, `◔◑◕` in Unicode), `braille`, `percent` | `ramp` |
-| `AGENTLINE_EFFORT_STYLE` | `ramp` `▁▂▄▆█`, `dots` `●●○○○`, `bars` `▰▰▱▱▱`, `squares` `■■□□□`, `text` (word only) | `ramp` |
-| `AGENTLINE_ULTRA_EFFECT` | `rainbow` (drifting gradient), `violet` (Claude Code's ultracode violet with a sweeping highlight), `plain` (static violet) | `rainbow` |
 | `AGENTLINE_SEGMENTS` | shown parts: `dir git session meta model effort ctx 5h 7d cache cost lines` | all |
+| `AGENTLINE_CODEX_MIRROR` | `1`: Codex shows the items closest to the Claude Code parts shown; `0`: `AGENTLINE_CODEX_ITEMS` | `1` |
 | `AGENTLINE_CODEX_ITEMS` | Codex items, in order (see `codex/preset`) | the preset |
-| `AGENTLINE_AUTO_UPDATE` | `1`, `0` | `1` |
+| `AGENTLINE_PATH_COLOR` | `R;G;B` | `215;119;87` (Claude Code's accent) |
 | `AGENTLINE_ICON_GAP` | `auto`, `0`, `1`: space after Nerd icons, which are often drawn wider than their cell | `auto` (on with Nerd glyphs) |
+| `AGENTLINE_AUTO_UPDATE` | `1`, `0` | `1` |
 
 `auto` icons follow `AGENTLINE_GLYPHS`: octicons with `nerd`, Unicode otherwise.
 The preview above uses `unicode` glyphs and `smooth` bars. `capsule` needs Nerd glyphs; with `unicode` it falls back to `smooth`.
@@ -178,10 +158,10 @@ The Unicode set follows [Starship](https://starship.rs)'s conventions.
 
 Codex has no external status line command: its `tui.status_line` setting is a list
 of items Codex draws itself, so custom glyphs, bars, colours and layout are not
-possible there. What you can choose is which items it shows and in what order: the
-assistant lists all of them (default: model and reasoning, directory, git branch,
-context used, 5-hour and weekly limits, estimated cost), or set
-`AGENTLINE_CODEX_ITEMS`. `status_line_use_colors = true` is set as well.
+possible there. What you can choose is which items it shows. By default it mirrors
+the Claude Code side: model and reasoning, directory, git branch, session title,
+context used, 5-hour and weekly limits and estimated cost, minus whatever you hide
+in Claude Code. Turn mirroring off to pick items by hand (`AGENTLINE_CODEX_ITEMS`). `status_line_use_colors = true` is set as well.
 
 The installer only touches the two keys it manages in `[tui]` (tagged
 `# agentline`). A `status_line` of yours is commented out, not deleted, and

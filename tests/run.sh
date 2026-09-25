@@ -9,6 +9,7 @@ check() { if "$@"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL:
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" XDG_DATA_HOME="$TMP/home/.local/share" XDG_RUNTIME_DIR="$TMP/run"
 unset CLAUDE_CONFIG_DIR CODEX_HOME
+export AGENTLINE_ASSUME_NERD=1   # font detection is tested on its own below
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
 
 # A git repository with staged, modified and untracked files for the fixtures.
@@ -51,8 +52,8 @@ for fx in "$ROOT"/tests/fixtures/*.json; do
     done
 done
 
-for cs in ramp minibar pie braille percent; do
-    for es in ramp dots bars squares text; do
+for cs in ramp capsule pie braille dots none; do
+    for es in ramp dots capsule segments pie none; do
         for ue in rainbow violet plain; do
             for cols in 60 100 160; do
                 out=$(jq --arg tr "$ROOT/tests/fixtures/ultra-transcript.jsonl" '.transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
@@ -118,7 +119,8 @@ check test "$(jq -S . "$HOME/.claude/settings.json")" = "$(jq -S . "$TMP/claude-
 echo "codex"
 toml_ok() { python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$1"; }
 items() { python3 -c 'import sys, tomllib; print(",".join(tomllib.load(open(sys.argv[1], "rb")).get("tui", {}).get("status_line", [])))' "$1"; }
-expected=$(grep -v '^[[:space:]]*\(#\|$\)' "$ROOT/codex/preset" | paste -sd, -)
+# Default: Codex mirrors every Claude Code part it has an item for.
+expected="model-with-reasoning,current-dir,git-branch,thread-title,context-used,five-hour-limit,weekly-limit,estimated-thread-cost"
 mkdir -p "$HOME/.codex"
 # Case 1: a [tui] table with a multi-line status_line of the user's.
 cat > "$HOME/.codex/config.toml" <<'EOF'
@@ -165,12 +167,12 @@ cp -R "$ROOT"/{install.sh,VERSION,README.md,LICENSE,claude,codex,lib,bin} "$TMP/
 tar czf "$TMP/release.tar.gz" -C "$TMP/pkg" agentline-test
 # Keys for the assistant: ↓ → on each setting, then hide "Session name", Enter.
 D=$'\e[B' R=$'\e[C' L=$'\e[D'
-printf '%s' "$D$R" "$D$L" "$D$R" "$D$R" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " $'\n' > "$TMP/answers"
+printf '%s' "$D" "$D$R" "$D$R" "$D$L" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " $'\n' > "$TMP/answers"
 (cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" AGENTLINE_TTY="$TMP/answers" COLUMNS=100 \
     bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1)
 CHECK_NAME="bootstrap: exit 0"; check test $? -eq 0
 conf="$BH/home/.config/agentline/config"
-for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=minibar EFFORT_STYLE=dots ULTRA_EFFECT=violet \
+for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=dots EFFORT_STYLE=braille ULTRA_EFFECT=violet \
           BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0; do
     CHECK_NAME="assistant: $kv saved"; check grep -qx "AGENTLINE_$kv" "$conf"
 done
@@ -193,6 +195,20 @@ CHECK_NAME="update: configuration kept"; check grep -qx 'AGENTLINE_RESET_ICON=md
 "${benv[@]}" "$BH/home/.local/bin/agentline" uninstall > /dev/null 2>&1
 CHECK_NAME="uninstall: command removed"; check test ! -e "$BH/home/.local/bin/agentline"
 CHECK_NAME="uninstall: statusLine removed"; check test "$(jq -c '.statusLine // null' "$BH/home/.claude/settings.json")" = null
+
+# ── Defaults without a Nerd Font, Codex mirroring ──────────────────────────
+echo "defaults and mirroring"
+NH="$TMP/nonerd"; mkdir -p "$NH/home/.claude" "$NH/home/.codex"
+nenv=(env HOME="$NH/home" XDG_CONFIG_HOME="$NH/home/.config" XDG_DATA_HOME="$NH/home/.local/share" XDG_RUNTIME_DIR="$TMP/run")
+"${nenv[@]}" AGENTLINE_ASSUME_NERD=0 "$ROOT/install.sh" --yes --claude --codex > /dev/null 2>&1
+CHECK_NAME="no Nerd Font: Unicode glyphs by default"; check grep -qx 'AGENTLINE_GLYPHS=unicode' "$NH/home/.config/agentline/config"
+CHECK_NAME="no Nerd Font: smooth bars by default"; check grep -qx 'AGENTLINE_BAR=smooth' "$NH/home/.config/agentline/config"
+"${nenv[@]}" "$ROOT/install.sh" --yes --claude --codex --segments "dir ctx 7d" > /dev/null 2>&1
+CHECK_NAME="mirror: Codex follows the Claude Code parts"
+check test "$(items "$NH/home/.codex/config.toml")" = "current-dir,context-used,weekly-limit"
+"${nenv[@]}" "$ROOT/install.sh" --yes --codex --codex-mirror off > /dev/null 2>&1
+CHECK_NAME="mirror off: preset items"
+check test "$(items "$NH/home/.codex/config.toml")" = "$(grep -v '^[[:space:]]*\(#\|$\)' "$ROOT/codex/preset" | paste -sd, -)"
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

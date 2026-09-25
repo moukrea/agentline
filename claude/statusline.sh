@@ -32,15 +32,22 @@ CONFIG_FILE="${AGENTLINE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agentline/con
 # shellcheck source=/dev/null
 [ -r "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 for k in "${!ENV_OVERRIDE[@]}"; do printf -v "AGENTLINE_$k" '%s' "${ENV_OVERRIDE[$k]}"; done
-GLYPHS=${AGENTLINE_GLYPHS:-unicode}           # unicode | nerd
-BAR_STYLE=${AGENTLINE_BAR:-blocks}             # blocks | smooth | line | segments | braille | capsule
+GLYPHS=${AGENTLINE_GLYPHS:-nerd}              # nerd | unicode
+# Gauge styles, the same catalogue for bars, compact gauges and effort:
+# capsule | smooth | blocks | line | segments | braille | ramp | dots | bars | squares | pie | none
+BAR_STYLE=${AGENTLINE_BAR:-capsule}            # context / 5h / 7d bars
 BRANCH_ICON=${AGENTLINE_BRANCH_ICON:-auto}     # auto | unicode | octicon | powerline | devicon
 RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
 PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
 ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
 SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort ctx 5h 7d cache cost lines}
-EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-ramp}   # ramp | dots | bars | squares | text
-COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-ramp} # ramp | minibar | pie | braille | percent
+EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-ramp}   # effort gauge
+COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-ramp} # gauges on narrow terminals
+# Older names: minibar = the bar style, 5 cells wide; text / percent = none.
+[ "$COMPACT_STYLE" = minibar ] && COMPACT_STYLE=$BAR_STYLE
+for v in BAR_STYLE COMPACT_STYLE EFFORT_STYLE; do
+    case ${!v} in text|percent) printf -v "$v" none ;; esac
+done
 ULTRA_EFFECT=${AGENTLINE_ULTRA_EFFECT:-rainbow} # rainbow | violet | plain
 declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 
@@ -139,21 +146,51 @@ grad() {
     printf -v REPLY '\e[38;2;%d;%d;%dm' "$r" "$g" "$b"
 }
 
-# Progress bar with a heat gradient: bar <permille> <width> → REPLY
+# gauge <style> <permille> <width> <colour> → REPLY
+#   colour: "heat" (green → red along the gauge), an escape sequence (lit
+#   cells in that colour), or "plain" (no colour, for the ultracode effect).
 EIGHTHS=(' ' '▏' '▎' '▍' '▌' '▋' '▊' '▉')
 SHADE=(' ' '░' '░' '▒' '▒' '▒' '▓' '▓')
 BRAILLE=('⣀' '⣀' '⣄' '⣤' '⣦' '⣶' '⣷' '⣿')
+RAMP=(▁ ▂ ▄ ▆ █)
+PIE_NERD=($'\U000f0766' $'\U000f0a9e' $'\U000f0a9f' $'\U000f0aa0' $'\U000f0aa1' $'\U000f0aa2' $'\U000f0aa3' $'\U000f0aa4' $'\U000f0aa5')
+PIE_UNI=(○ ◔ ◑ ◕ ●)
 RAIL=$'\e[48;2;38;42;46m'; RAILFG=$'\e[38;2;38;42;46m'
-bar() {
-    local pm=$1 w=$2 out="" i units style=$BAR_STYLE first="" last=""
+cell_colour() { # cell_colour <colour> <position 0-100> → REPLY
+    case $1 in heat) grad "$2" ;; plain) REPLY="" ;; *) REPLY=$1 ;; esac
+}
+gauge() {
+    local style=$1 pm=$2 w=$3 col=$4 out="" i units lit first="" last="" on off
+    ((pm > 1000)) && pm=1000; ((pm < 0)) && pm=0
     # Rounded caps are Nerd glyphs; without them a capsule is a smooth bar.
     [ "$style" = capsule ] && [ "$GLYPHS" != nerd ] && style=smooth
-    ((pm > 1000)) && pm=1000; ((pm < 0)) && pm=0
+    case $style in
+        none|"") REPLY=""; return ;;
+        pie)
+            cell_colour "$col" $((pm / 10))
+            if [ "$GLYPHS" = nerd ]; then REPLY="$REPLY${PIE_NERD[(pm * 8 + 999) / 1000]}$G"
+            else REPLY="$REPLY${PIE_UNI[(pm * 4 + 249) / 250]}"; fi
+            [ "$col" = plain ] || REPLY+=$RST; return ;;
+        ramp|dots|bars|squares)
+            lit=$(((pm * w + 500) / 1000)); ((pm > 0 && lit == 0)) && lit=1
+            for ((i = 0; i < w; i++)); do
+                case $style in
+                    ramp) on=${RAMP[i * 5 / w]} off=$on ;; dots) on=● off=○ ;;
+                    bars) on=▰ off=▱ ;; squares) on=■ off=□ ;;
+                esac
+                if ((i < lit)); then cell_colour "$col" $(((i * 100 + 50) / w)); out+="$REPLY$on"
+                elif [ "$col" = plain ]; then out+=$off
+                else out+="$TRACK$off"; fi
+            done
+            [ "$col" = plain ] && REPLY=$out || REPLY="$out$RST"; return ;;
+    esac
+    # Bar styles, with sub-cell precision.
     [ "$style" = capsule ] && w=$((w - 2))
+    ((w < 1)) && w=1
     units=$((pm * w * 8 / 1000))
     ((pm > 0 && units == 0)) && units=1
     for ((i = 0; i < w; i++)); do
-        grad $(((i * 100 + 50) / w))
+        cell_colour "$col" $(((i * 100 + 50) / w))
         ((i == 0)) && first=$REPLY
         if ((units >= 8)); then
             case $style in
@@ -163,13 +200,15 @@ bar() {
             units=$((units - 8)); last=$REPLY
         elif ((units > 0)); then
             case $style in
-                smooth|capsule) out+="$RAIL$REPLY${EIGHTHS[units]}$RST" ;;
+                smooth|capsule) [ "$col" = plain ] && out+="${EIGHTHS[units]}" || out+="$RAIL$REPLY${EIGHTHS[units]}$RST" ;;
                 line) ((units >= 4)) && out+="$REPLY╸" || out+="$TRACK─" ;;
                 segments) ((units >= 4)) && out+="$REPLY■" || out+="$TRACK□" ;;
                 braille) out+="$REPLY${BRAILLE[units]}" ;;
                 *) out+="$REPLY${SHADE[units]}" ;;
             esac
             units=0
+        elif [ "$col" = plain ]; then
+            case $style in line) out+="─" ;; segments) out+="□" ;; braille) out+="⣀" ;; blocks) out+="░" ;; *) out+=" " ;; esac
         else
             case $style in
                 smooth|capsule) out+="$RAIL $RST" ;; line) out+="$TRACK─" ;; segments) out+="$TRACK□" ;;
@@ -181,55 +220,10 @@ bar() {
         # Rounded caps (U+E0B6 / U+E0B4), coloured like the cell they touch.
         local lc=$RAILFG rc=$RAILFG
         ((pm > 0)) && lc=$first; ((pm >= 1000)) && rc=$last
-        out="$lc"$'\ue0b6'"$RST$out$rc"$'\ue0b4'
+        if [ "$col" = plain ]; then out=$'\ue0b6'"$out"$'\ue0b4'
+        else out="$lc"$'\ue0b6'"$RST$out$rc"$'\ue0b4'; fi
     fi
-    REPLY="$out$RST"
-}
-
-# Compact 5-step ramp gauge (same shape as the effort gauge): ramp <permille>
-RAMP=(▁ ▂ ▄ ▆ █)
-ramp() {
-    local pm=$1 lit i out=""
-    lit=$(((pm + 199) / 200)); ((lit > 5)) && lit=5
-    for ((i = 0; i < 5; i++)); do
-        if ((i < lit)); then grad $((i * 25)); out+="$REPLY${RAMP[i]}"
-        else out+="$TRACK${RAMP[i]}"; fi
-    done
-    REPLY="$out$RST"
-}
-
-# Compact gauge for narrow terminals: compact <permille> → REPLY ("" = none)
-PIE_NERD=($'\U000f0766' $'\U000f0a9e' $'\U000f0a9f' $'\U000f0aa0' $'\U000f0aa1' $'\U000f0aa2' $'\U000f0aa3' $'\U000f0aa4' $'\U000f0aa5')
-PIE_UNI=(○ ◔ ◑ ◕ ●)
-compact() {
-    local pm=$1 i
-    ((pm > 1000)) && pm=1000; ((pm < 0)) && pm=0
-    case $COMPACT_STYLE in
-        minibar) bar "$pm" 5 ;;
-        pie)
-            grad $((pm / 10))
-            if [ "$GLYPHS" = nerd ]; then i=$(((pm * 8 + 999) / 1000)); REPLY="$REPLY${PIE_NERD[i]}$G$RST"
-            else i=$(((pm * 4 + 249) / 250)); REPLY="$REPLY${PIE_UNI[i]}$RST"; fi ;;
-        braille) grad $((pm / 10)); REPLY="$REPLY${BRAILLE[pm * 7 / 1000]}$RST" ;;
-        percent) REPLY="" ;;
-        *) ramp "$pm" ;;
-    esac
-}
-
-# Effort gauge: effort_gauge <level 1-5> <colour> → REPLY (plain when colour is "")
-effort_gauge() {
-    local lvl=$1 col=$2 i lit dim out=""
-    case $EFFORT_STYLE in
-        dots) lit=(● ● ● ● ●) dim=(○ ○ ○ ○ ○) ;; bars) lit=(▰ ▰ ▰ ▰ ▰) dim=(▱ ▱ ▱ ▱ ▱) ;;
-        squares) lit=(■ ■ ■ ■ ■) dim=(□ □ □ □ □) ;; text) REPLY=""; return ;;
-        *) lit=("${RAMP[@]}") dim=("${RAMP[@]}") ;;
-    esac
-    for ((i = 0; i < 5; i++)); do
-        if [ -z "$col" ]; then out+=${lit[i]}
-        elif ((i < lvl)); then out+="$col${lit[i]}"
-        else out+="$TRACK${dim[i]}"; fi
-    done
-    REPLY="$out${col:+$RST}"
+    [ "$col" = plain ] && REPLY=$out || REPLY="$out$RST"
 }
 
 pct_color() { # pct_color <pct> [force-red]
@@ -422,28 +416,24 @@ fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts="
 show_model=${ON[model]:-}; show_effort=${ON[effort]:-}
 [ -n "$show_model$show_effort" ] && ON[model]=1
 mname=""; [ -n "$show_model" ] && mname=$m
+mt=""; [ -n "$mname" ] && mt="${TEXT}${mname}${RST}"
 if ((ultra)); then
-    g=""; [ -n "$show_effort" ] && { effort_gauge 5 ""; g=$REPLY; }
-    word=""; [ -n "$show_effort" ] && word="ultracode"
-    sp1="" sp2=""
-    if [ "$ULTRA_EFFECT" != plain ]; then
-        SPARK=("✦" "✧" "⋆" "·" "⋆" "✧")
-        if [ "$ULTRA_EFFECT" = violet ]; then
-            ((frame % 2)) && c1="240;232;255" c2="175;135;255" || c1="175;135;255" c2="240;232;255"
-            sp1=$'\e[38;2;'"${c1}m${SPARK[frame % 6]}$RST " sp2=" "$'\e[38;2;'"${c2}m${SPARK[(frame + 3) % 6]}$RST"
-        else
-            hue $((-frame * 15 - 18)); sp1=$'\e[38;2;'"${REPLY}m${SPARK[frame % 6]}$RST "
-            hue $((-frame * 15 + 180)); sp2=" "$'\e[38;2;'"${REPLY}m${SPARK[(frame + 3) % 6]}$RST"
-        fi
-    fi
-    t="$mname${g:+ $g}${word:+ $word}"; ultra_fx "${t# }"; put model 0 "$sp1$REPLY$sp2$fastm"
-    t="$mname${g:+ $g}${word:+ ultra}"; ultra_fx "${t# }"; put model 1 "$sp1$REPLY$sp2$fasts"
-    t="${mname%% *}${g:+ $g}"; ultra_fx "${t# }"; put model 2 "$sp1$REPLY$fasts"
-    [ -n "$g" ] && { ultra_fx "$g"; put model 3 "$REPLY"; }
+    # The effect covers the effort part only (gauge + word), not the model.
+    g=""; [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" 1000 5 plain; g=$REPLY; }
+    for v in 0:ultracode 1:ultra 2: 3:; do
+        word=${v#*:}; [ -n "$show_effort" ] || word=""
+        e="$g${word:+${g:+ }$word}"
+        if [ -n "$e" ]; then ultra_fx "$e"; e=$REPLY; fi
+        case ${v%%:*} in
+            0|1) t="$mt${e:+${mt:+ }$e}" ;;
+            2) t="${mname:+${TEXT}${mname%% *}${RST}}${e:+${mname:+ }$e}" ;;
+            3) t=$e ;;
+        esac
+        [ -n "$t" ] && put model "${v%%:*}" "$t$([ "${v%%:*}" = 0 ] && echo "$fastm" || echo "$fasts")"
+    done
 else
-    g=""; ((lvl)) && [ -n "$show_effort" ] && { effort_gauge "$lvl" "$ecol"; g=${REPLY:+ $REPLY}; }
+    g=""; ((lvl)) && [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" $((lvl * 200)) 5 "$ecol"; g=${REPLY:+ $REPLY}; }
     etxt=""; ((lvl)) && [ -n "$show_effort" ] && etxt=" ${ecol}${effort}${RST}"
-    mt=""; [ -n "$mname" ] && mt="${TEXT}${mname}${RST}"
     t="$mt$g$etxt$fastm"; put model 0 "${t# }"
     t="$mt$g$fasts"; [ -n "$g$mt" ] || t="$mt$etxt$fasts"; put model 1 "${t# }"
     t="${mname:+${TEXT}${mname%% *}${RST}}$g$fasts"; [ -n "$g$mname" ] || t="$etxt"; put model 2 "${t# }"
@@ -456,9 +446,9 @@ if ((ctx_size > 0)); then
     grad "$pct"; pc=$REPLY
     if ((pct >= 85)); then ((frame % 2)) && pc="$BOLD$RED_HI" || pc="$BOLD$RED"; fi
     printf -v ptxt '%s%d%%%s' "$pc" "$pct" "$RST"
-    bar "$pm" 10; put ctx 0 "${LABEL}context${RST} $REPLY $ptxt"
-    bar "$pm" 10; put ctx 1 "${LABEL}ctx${RST} $REPLY $ptxt"
-    compact "$pm"; put ctx 2 "${LABEL}ctx${RST}${REPLY:+ $REPLY} ${pc}${pct}%${RST}"
+    gauge "$BAR_STYLE" "$pm" 10 heat; put ctx 0 "${LABEL}context${RST}${REPLY:+ $REPLY} $ptxt"
+    gauge "$BAR_STYLE" "$pm" 10 heat; put ctx 1 "${LABEL}ctx${RST}${REPLY:+ $REPLY} $ptxt"
+    gauge "$COMPACT_STYLE" "$pm" 5 heat; put ctx 2 "${LABEL}ctx${RST}${REPLY:+ $REPLY} ${pc}${pct}%${RST}"
 fi
 
 # Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
@@ -477,9 +467,9 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
     fi
     pcol=$REPLY
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
-    bar $((used * 10)) 10
-    put "$name" 0 "${LABEL}${name}${RST} $REPLY ${ptx}${tail}"
-    compact $((used * 10)); rp=${REPLY:+ $REPLY}
+    gauge "$BAR_STYLE" $((used * 10)) 10 heat
+    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
+    gauge "$COMPACT_STYLE" $((used * 10)) 5 heat; rp=${REPLY:+ $REPLY}
     put "$name" 1 "${LABEL}${name}${RST}$rp ${ptx}${tail}"
     put "$name" 2 "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
 }
