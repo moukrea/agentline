@@ -3,6 +3,8 @@
 A two-line status line for AI coding agents in the terminal: the full version for
 **Claude Code**, a matching built-in preset for **Codex**.
 
+![agentline: bars, effort gauge, responsive layout, glyphs, live states and ultracode effects](docs/demo.gif)
+
 ```
 ~/…/Personal/agentline  ⎇ feat/installer +2 !1 ?3  “Refactor the billing module”          ◇ Concise  Opus 5.5 ▁▂▄▆█ medium
 context ██▋       26%  5h ██▋       27% ↻3h29  7d ████▍     44% ↻3d18h           cache 🔥 51m  $10.28 in 3h12  edits +663 −41
@@ -183,6 +185,10 @@ tests/run.sh    # renders every fixture × glyph set × bar style at 17 widths;
 ```
 
 CI runs ShellCheck and the suite on every push.
+
+`docs/demo.gif` is recorded from the real renderer with a pinned clock and sample
+session: `tools/record-demo.py --fonts DIR` (JuliaMono and Symbols Nerd Font Mono
+files in DIR; needs Pillow, ffmpeg and Noto Color Emoji).
 
 ## License
 

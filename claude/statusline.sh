@@ -14,7 +14,7 @@ shopt -s extglob
 export LC_ALL=C.UTF-8
 
 input=$(cat)
-now=$EPOCHSECONDS
+now=${AGENTLINE_NOW:-$EPOCHSECONDS}   # AGENTLINE_NOW pins the clock (demo recording)
 # Claude Code re-renders at most once per second (refreshInterval >= 1), so the
 # animation advances one small step per second; AGENTLINE_FRAME pins it.
 frame=${AGENTLINE_FRAME:-$now}
