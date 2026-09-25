@@ -15,16 +15,16 @@ export LC_ALL=C.UTF-8
 
 input=$(cat)
 now=$EPOCHSECONDS
-us=${EPOCHREALTIME/./}
-# 4 animation steps per second; AGENTLINE_FRAME pins it (previews, tests).
-frame=${AGENTLINE_FRAME:-$((us / 250000))}
+# Claude Code re-renders at most once per second (refreshInterval >= 1), so the
+# animation advances one small step per second; AGENTLINE_FRAME pins it.
+frame=${AGENTLINE_FRAME:-$now}
 CACHE_DIR="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID"
 [ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
 
 # ── Configuration ─────────────────────────────────────────────────────────
 # Environment wins over the config file, which wins over the defaults.
 declare -A ENV_OVERRIDE
-for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP; do
+for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP AUTO_UPDATE; do
     v="AGENTLINE_$k"; [ -n "${!v+x}" ] && ENV_OVERRIDE[$k]=${!v}
 done
 CONFIG_FILE="${AGENTLINE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agentline/config}"
@@ -111,8 +111,16 @@ fg 205 205 215; TEXT=$REPLY
 fg 120 200 255; ICE=$REPLY
 fg 75 75 90;    TRACK=$REPLY
 fg 125 125 140; LABEL=$REPLY
-RAINBOW=("255;85;85" "255;140;60" "255;200;60" "200;230;60" "110;220;90" "60;220;160"
-         "60;200;230" "80;150;255" "120;110;255" "170;90;255" "230;90;230" "255;90;160")
+# hue <degrees> → REPLY "r;g;b" (HSV, saturation 0.7, value 1)
+hue() {
+    local h=$(( ($1 % 360 + 360) % 360 )) x c=255 m=77 r g b
+    x=$(( (c - m) * (60 - ( h % 120 - 60 < 0 ? 60 - h % 120 : h % 120 - 60 )) / 60 + m ))
+    case $((h / 60)) in
+        0) r=$c g=$x b=$m ;; 1) r=$x g=$c b=$m ;; 2) r=$m g=$c b=$x ;;
+        3) r=$m g=$x b=$c ;; 4) r=$x g=$m b=$c ;; *) r=$c g=$m b=$x ;;
+    esac
+    REPLY="$r;$g;$b"
+}
 
 vis() { local s=${1//$'\e['*([0-9;])m/}; REPLY=${#s}; }
 
@@ -198,14 +206,15 @@ fmt_dur() {
     else REPLY="${s}s"; fi
 }
 
-# Rainbow shimmer, phase-shifted by the animation frame
+# Rainbow gradient across the text (18° per character) drifting 15° per
+# second: at one frame per second the colours flow instead of jumping.
 shimmer() {
-    local t=$1 out="" i ch k
+    local t=$1 out="" i ch
     for ((i = 0; i < ${#t}; i++)); do
         ch=${t:i:1}
         [[ $ch == ' ' ]] && { out+=' '; continue; }
-        k=$((((i - frame) % 12 + 12) % 12))
-        out+=$'\e[1;38;2;'"${RAINBOW[k]}m$ch"
+        hue $((i * 18 - frame * 15))
+        out+=$'\e[1;38;2;'"${REPLY}m$ch"
     done
     REPLY="$out$RST"
 }
@@ -235,7 +244,11 @@ gcache="$CACHE_DIR/git-${cwd//\//%}"
 gts=0
 # shellcheck source=/dev/null
 [ -r "$gcache" ] && . "$gcache"
-if ((now - gts >= 2)); then
+if [ -n "${AGENTLINE_DEMO_GIT:-}" ]; then
+    # Previews (installer, docs): "branch staged modified untracked ahead behind stash"
+    read -r head staged unstaged untracked ahead behind stash <<<"$AGENTLINE_DEMO_GIT"
+    is_git=1 conflicts=0 in_wt=0 gts=$now
+elif ((now - gts >= 2)); then
     if dirs=$(git -C "$cwd" --no-optional-locks rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null); then
         is_git=1 head="" oid="" ahead=0 behind=0 stash=0 staged=0 unstaged=0 untracked=0 conflicts=0 in_wt=0
         [ "${dirs%%$'\n'*}" != "${dirs##*$'\n'}" ] && in_wt=1
@@ -346,9 +359,8 @@ ecol=$REPLY
 fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts=" ${YELLOW}»${RST}"
 if ((ultra)); then
     SPARK=("✦" "✧" "⋆" "·" "⋆" "✧")
-    k1=$(((frame % 12 + 12) % 12)); k2=$((((frame + 6) % 12 + 12) % 12))
-    sp1=$'\e[38;2;'"${RAINBOW[k1]}m${SPARK[frame % 6]}$RST"
-    sp2=$'\e[38;2;'"${RAINBOW[k2]}m${SPARK[(frame + 3) % 6]}$RST"
+    hue $((-frame * 15 - 18)); sp1=$'\e[38;2;'"${REPLY}m${SPARK[frame % 6]}$RST"
+    hue $((-frame * 15 + 180)); sp2=$'\e[38;2;'"${REPLY}m${SPARK[(frame + 3) % 6]}$RST"
     shimmer "$m ▁▂▄▆█ ultracode"; put model 0 "$sp1 $REPLY $sp2$fastm"
     shimmer "$m ▁▂▄▆█ ultra";     put model 1 "$sp1 $REPLY $sp2$fasts"
     shimmer "${m%% *} ▁▂▄▆█";     put model 2 "$sp1 $REPLY$fasts"
@@ -369,7 +381,7 @@ fi
 if ((ctx_size > 0)); then
     pm=$((ctx_used * 1000 / ctx_size)); pct=$((pm / 10))
     grad "$pct"; pc=$REPLY
-    if ((pct >= 85)); then ((frame / 2 % 2)) && pc="$BOLD$RED_HI" || pc="$BOLD$RED"; fi
+    if ((pct >= 85)); then ((frame % 2)) && pc="$BOLD$RED_HI" || pc="$BOLD$RED"; fi
     printf -v ptxt '%s%d%%%s' "$pc" "$pct" "$RST"
     bar "$pm" 10; put ctx 0 "${LABEL}context${RST} $REPLY $ptxt"
     bar "$pm" 10; put ctx 1 "${LABEL}ctx${RST} $REPLY $ptxt"
@@ -412,7 +424,7 @@ if [ "$cache_seen" = true ]; then
             put cache 0 "${LABEL}cache${RST} 🔥 ${ORANGE}${ttl}${RST}" 1
             put cache 1 "🔥${ORANGE}${ttl}${RST}" 1
         else
-            ((frame / 2 % 2)) && c="$BOLD$YELLOW" || c=$YELLOW
+            ((frame % 2)) && c="$BOLD$YELLOW" || c=$YELLOW
             put cache 0 "${LABEL}cache${RST} ⏳ ${c}${ttl}${RST}" 1
             put cache 1 "⏳${c}${ttl}${RST}" 1
         fi
@@ -480,3 +492,13 @@ fit_line "ctx 5h 7d" "cache cost lines" \
     lines lines cost ctx cache ctx+5h+7d cost cache 5h+7d 7d
 line2=$REPLY
 printf '%s\n%s\n' "$line1" "$line2"
+
+# ── Auto-update: at most one background check a day, never blocking ──────
+if [ "${AGENTLINE_AUTO_UPDATE:-0}" = 1 ] && [ -z "${AGENTLINE_DEMO_GIT:-}" ]; then
+    data="${XDG_DATA_HOME:-$HOME/.local/share}/agentline" last=0
+    [ -r "$data/last-update-check" ] && read -r last < "$data/last-update-check"
+    if ((now - ${last:-0} > 86400)) && [ -x "$data/current/bin/agentline" ]; then
+        echo "$now" > "$data/last-update-check"
+        (setsid "$data/current/bin/agentline" update --quiet </dev/null >/dev/null 2>&1 &)
+    fi
+fi
