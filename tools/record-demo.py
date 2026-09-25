@@ -69,7 +69,7 @@ def scenario(name):
     return p
 
 # The installer's defaults on a machine with a Nerd Font.
-DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='ramp', EFFORT_STYLE='auto', ULTRA_EFFECT='rainbow',
+DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='pie', EFFORT_STYLE='dots', ULTRA_EFFECT='violet',
                BRANCH_ICON='auto', RESET_ICON='auto',
                SEGMENTS='dir git session meta model effort ctx 5h 7d cache cost lines')
 
@@ -205,14 +205,14 @@ for s_ in STYLES:
 show(screen(caption=('AGENTLINE_BAR', 'capsule', 'default')), 500)
 for s_ in STYLES:
     show(screen(EFFORT_STYLE=s_, caption=('AGENTLINE_EFFORT_STYLE', s_)), 520)
-show(screen(caption=('AGENTLINE_EFFORT_STYLE', 'auto', 'default: same style as the bars')), 700)
+show(screen(caption=('AGENTLINE_EFFORT_STYLE', 'dots', 'default')), 700)
 # Not a setting: the terminal gets narrower and the layout adapts.
 for c in range(MAXCOLS, 67, -2):
     hold(screen(cols=c, caption=('Terminal width', f'{c} columns', 'the layout adapts')), 45)
 hold(screen(cols=68, caption=('Terminal width', '68 columns', 'the layout adapts')), 900)
 for s_ in STYLES:
     show(screen(cols=68, COMPACT_STYLE=s_, caption=('AGENTLINE_COMPACT_STYLE', s_, 'gauges on narrow terminals')), 520)
-show(screen(cols=68, caption=('AGENTLINE_COMPACT_STYLE', 'ramp', 'default')), 400)
+show(screen(cols=68, caption=('AGENTLINE_COMPACT_STYLE', 'pie', 'default')), 400)
 for c in range(68, MAXCOLS + 1, 2):
     hold(screen(cols=c, caption=('Terminal width', f'{c} columns', 'the layout adapts')), 35)
 hold(screen(caption=('Terminal width', f'{MAXCOLS} columns', 'the layout adapts')), 700)
@@ -234,8 +234,8 @@ fade(screen(scen='expiring', frame=0, caption=cap))
 for f in range(3):
     hold(screen(scen='expiring', frame=f, caption=cap), 1000)
 show(screen(scen='cold', caption=('Live state · prompt cache', 'cold', 'the next turn re-reads the context')), 1400)
-for effect, n in [('rainbow', 6), ('violet', 6), ('plain', 1)]:
-    cap = ('AGENTLINE_ULTRA_EFFECT', effect, 'in an ultracode session · 1 frame per second')
+for effect, n in [('violet', 6), ('rainbow', 6), ('plain', 1)]:
+    cap = ('AGENTLINE_ULTRA_EFFECT', effect, ('default · ' if effect == 'violet' else '') + 'in an ultracode session · 1 frame per second')
     fade(screen(scen='ultra', frame=0, ULTRA_EFFECT=effect, caption=cap))
     for f in range(n):
         hold(screen(scen='ultra', frame=f, ULTRA_EFFECT=effect, caption=cap), 1000 if n > 1 else 1300)

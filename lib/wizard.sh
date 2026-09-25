@@ -240,7 +240,7 @@ wizard() {
     else
         WIZ_VAL=([GLYPHS]=unicode [BAR]=smooth [BRANCH_ICON]=unicode [RESET_ICON]=unicode)
     fi
-    WIZ_VAL+=([SCENARIO]=session [COMPACT_STYLE]=ramp [EFFORT_STYLE]=auto [ULTRA_EFFECT]=rainbow
+    WIZ_VAL+=([SCENARIO]=session [COMPACT_STYLE]=pie [EFFORT_STYLE]=dots [ULTRA_EFFECT]=violet
               [AUTO_UPDATE]=1 [CODEX_MIRROR]=1 [CODEX_OPEN]=0)
     local AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines" AGENTLINE_CODEX_ITEMS=""
     local AGENTLINE_GLYPHS="" AGENTLINE_BAR="" AGENTLINE_COMPACT_STYLE="" AGENTLINE_EFFORT_STYLE="" AGENTLINE_ULTRA_EFFECT=""

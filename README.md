@@ -127,9 +127,9 @@ The three gauges (bars, compact gauges, effort) share one catalogue of styles:
 |---|---|---|
 | `AGENTLINE_GLYPHS` | `nerd`, `unicode` | `nerd` when a Nerd Font is installed, else `unicode` |
 | `AGENTLINE_BAR` | context, 5h and 7d bars: any style | `capsule` with Nerd glyphs, else `smooth` |
-| `AGENTLINE_COMPACT_STYLE` | gauges when the terminal is too narrow for bars: any style | `ramp` |
-| `AGENTLINE_EFFORT_STYLE` | effort gauge: any style, or `auto` (same as the bars) | `auto` |
-| `AGENTLINE_ULTRA_EFFECT` | `rainbow` (drifting gradient), `violet` (Claude Code's ultracode violet with a sweeping highlight), `plain` (static violet); applies to the effort part only | `rainbow` |
+| `AGENTLINE_COMPACT_STYLE` | gauges when the terminal is too narrow for bars: any style | `pie` |
+| `AGENTLINE_EFFORT_STYLE` | effort gauge: any style, or `auto` (same as the bars) | `dots` |
+| `AGENTLINE_ULTRA_EFFECT` | `rainbow` (drifting gradient), `violet` (Claude Code's ultracode violet with a sweeping highlight), `plain` (static violet); applies to the effort part only | `violet` |
 | `AGENTLINE_BRANCH_ICON` | `auto`, `unicode` `⎇`, `octicon`, `powerline`, `devicon` | `auto` |
 | `AGENTLINE_RESET_ICON` | `auto`, `unicode` `↻`, `octicon` (history), `mdi-history`, `mdi-progress-clock`, `mdi-refresh` | `auto` |
 | `AGENTLINE_SEGMENTS` | shown parts: `dir git session meta model effort ctx 5h 7d cache cost lines` | all |

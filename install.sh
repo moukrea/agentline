@@ -89,8 +89,8 @@ Options
                         blocks line segments braille ramp dots bars squares pie none
   --branch-icon ICON    auto | unicode | octicon | powerline | devicon
   --reset-icon ICON     auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
-  --effort-style STYLE  effort gauge, same styles, or auto = like the bars (default)
-  --compact-style STYLE gauges on narrow terminals, same styles (default: ramp)
+  --effort-style STYLE  effort gauge, same styles, or auto = like the bars (default: dots)
+  --compact-style STYLE gauges on narrow terminals, same styles (default: pie)
   --ultra-effect E      rainbow | violet | plain
   --segments "LIST"     Shown parts, among: dir git session meta model effort ctx 5h 7d cache cost lines
   --codex-mirror on|off Codex shows the items closest to the Claude Code parts shown

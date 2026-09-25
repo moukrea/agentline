@@ -41,15 +41,15 @@ RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-
 PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
 ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
 SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort ctx 5h 7d cache cost lines}
-EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-auto}   # effort gauge; auto = the bar style
-COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-ramp} # gauges on narrow terminals
+EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-dots}   # effort gauge; auto = the bar style
+COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-pie}  # gauges on narrow terminals
 # Older names: minibar = the bar style, 5 cells wide; text / percent = none.
 [ "$COMPACT_STYLE" = minibar ] && COMPACT_STYLE=$BAR_STYLE
 [ "$EFFORT_STYLE" = auto ] && EFFORT_STYLE=$BAR_STYLE
 for v in BAR_STYLE COMPACT_STYLE EFFORT_STYLE; do
     case ${!v} in text|percent) printf -v "$v" none ;; esac
 done
-ULTRA_EFFECT=${AGENTLINE_ULTRA_EFFECT:-rainbow} # rainbow | violet | plain
+ULTRA_EFFECT=${AGENTLINE_ULTRA_EFFECT:-violet} # violet | rainbow | plain
 declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 
 # ── Glyph sets ────────────────────────────────────────────────────────────
