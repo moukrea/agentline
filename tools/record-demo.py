@@ -6,35 +6,87 @@ Every frame is the renderer's actual output for a fixed sample session and a
 pinned clock; only captions and crossfades are added. Ultracode animations run
 at one frame per second, like in Claude Code.
 
-    tools/record-demo.py --fonts DIR [--out docs/demo.gif]
+    tools/record-demo.py [--fonts DIR] [--emoji-font FILE] [--caption-font FILE]
+                         [--caption-bold-font FILE] [--out docs/demo.gif]
 
-DIR holds JuliaMono-{Regular,Bold,RegularItalic}.ttf and
-SymbolsNerdFontMono-Regular.ttf. Needs Pillow, ffmpeg and Noto Color Emoji.
+DIR (default ~/.local/share/fonts) holds JuliaMono-{Regular,Bold,RegularItalic}.ttf
+and SymbolsNerdFontMono-Regular.ttf. Needs Pillow, ffmpeg, jq, Noto Sans for the
+captions and the bitmap (CBDT) build of Noto Color Emoji: FreeType cannot draw
+the COLRv1 build some distributions ship (Fedora's Noto-COLRv1.ttf). Fonts not
+given are looked up in DIR, the usual system paths and fontconfig.
+
+automodel is never called: the routed scene passes its answers in
+AGENTLINE_AUTOMODEL_JSON.
 """
-import argparse, functools, json, os, re, shutil, subprocess, tempfile, unicodedata
+import argparse, functools, json, os, re, shutil, subprocess, sys, tempfile, unicodedata
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOW = 1790000000
-EMOJI_FONT = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'
-CAPTION_FONT = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf'
-CAPTION_BOLD = '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf'
-BG, FG, PAGE = (17, 19, 20), (217, 223, 211), (11, 13, 14)
-CLAY, MUTED, BORDER = (215, 119, 87), (127, 135, 125), (48, 54, 52)
+PAGE, CLAY, MUTED = (11, 13, 14), (215, 119, 87), (127, 135, 125)
+# The simulated terminal: dark by default, light for AGENTLINE_THEME=light.
+TERM = {'dark': dict(bg=(17, 19, 20), fg=(217, 223, 211), muted=(127, 135, 125), border=(48, 54, 52),
+                     rule=(70, 76, 72), accent=(175, 135, 255), cursor=(217, 223, 211)),
+        'light': dict(bg=(250, 250, 246), fg=(40, 40, 50), muted=(110, 110, 125), border=(205, 207, 200),
+                      rule=(200, 202, 206), accent=(120, 80, 210), cursor=(40, 40, 50))}
 SIZE, MAXCOLS, ROWS = 15, 150, 9
 STYLES = ['capsule', 'smooth', 'blocks', 'line', 'segments', 'braille', 'ramp', 'dots', 'bars', 'squares', 'pie', 'none']
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--fonts', required=True)
+ap.add_argument('--fonts', default=os.path.expanduser('~/.local/share/fonts'))
+ap.add_argument('--emoji-font', help='Noto Color Emoji, bitmap (CBDT) build')
+ap.add_argument('--caption-font', help='Noto Sans Regular, or the variable Noto Sans')
+ap.add_argument('--caption-bold-font', help='Noto Sans Bold (default: the caption font, Bold instance)')
 ap.add_argument('--out', default=os.path.join(ROOT, 'docs', 'demo.gif'))
 args = ap.parse_args()
+
+def fc_files(pattern):
+    """The font files fontconfig lists for a pattern."""
+    try:
+        out = subprocess.run(['fc-list', '-f', '%{file}\n', pattern], capture_output=True, text=True).stdout
+    except OSError:
+        return []
+    return sorted(set(out.split()))
+
+def find_font(what, given, names, ok=lambda path: True, hint=''):
+    dirs = [args.fonts, '/usr/share/fonts/truetype/noto', '/usr/share/fonts/noto', '/usr/share/fonts/google-noto',
+            '/usr/share/fonts/google-noto-vf', '/usr/share/fonts/google-noto-color-emoji-fonts',
+            '/usr/local/share/fonts', os.path.expanduser('~/Library/Fonts'), '/Library/Fonts']
+    tried = [given] if given else [os.path.join(d, n) for n, _ in names for d in dirs]
+    if not given:
+        tried += [f for _, family in names if family for f in fc_files(family)]
+    for path in tried:
+        if os.path.isfile(path) and ok(path):
+            return path
+    sys.exit(f'record-demo: no usable {what}; tried: {", ".join(tried)}{hint}')
+
+def draws_emoji(path):
+    try:
+        im = Image.new('RGBA', (160, 160))
+        ImageDraw.Draw(im).text((0, 0), '🔥', font=ImageFont.truetype(path, 109), embedded_color=True)
+        return im.getbbox() is not None
+    except OSError:
+        return False
+
+def caption_font(path, bold):
+    f = ImageFont.truetype(path, 17)
+    if bold and 'bold' not in os.path.basename(path).lower():
+        try: f.set_variation_by_name('Bold')    # variable Noto Sans
+        except (OSError, ValueError): pass
+    return f
 
 F = {k: ImageFont.truetype(os.path.join(args.fonts, f), SIZE) for k, f in
      [('r', 'JuliaMono-Regular.ttf'), ('b', 'JuliaMono-Bold.ttf'), ('i', 'JuliaMono-RegularItalic.ttf'),
       ('nerd', 'SymbolsNerdFontMono-Regular.ttf')]}
-EMOJI = ImageFont.truetype(EMOJI_FONT, 109)
-CAP = ImageFont.truetype(CAPTION_FONT, 17)
-CAPB = ImageFont.truetype(CAPTION_BOLD, 17)
+EMOJI = ImageFont.truetype(find_font('Noto Color Emoji (bitmap build)', args.emoji_font,
+                                     [('NotoColorEmoji.ttf', 'Noto Color Emoji')], draws_emoji,
+                                     '. Get the bitmap build, e.g. https://github.com/googlefonts/noto-emoji/'
+                                     'raw/v2.047/fonts/NotoColorEmoji.ttf, and pass --emoji-font'), 109)
+CAPTION_FONT = find_font('Noto Sans', args.caption_font,
+                         [('NotoSans-Regular.ttf', 'Noto Sans:style=Regular'), ('NotoSans[wght].ttf', None)])
+CAPTION_BOLD = os.path.join(os.path.dirname(CAPTION_FONT), 'NotoSans-Bold.ttf')
+CAPTION_BOLD = args.caption_bold_font or (CAPTION_BOLD if os.path.isfile(CAPTION_BOLD) else CAPTION_FONT)
+CAP, CAPB = caption_font(CAPTION_FONT, False), caption_font(CAPTION_BOLD, True)
 CW = F['r'].getlength('M')
 LH = round(SIZE * 1.42)
 PAD, TOP = 22, 64
@@ -66,16 +118,26 @@ def scenario(name):
         p['effort'] = {'level': 'xhigh'}
     elif name.startswith('effort:'):
         p['effort'] = {'level': name[7:]}
+    elif name == 'jev':   # a session on automodel's custom model: Claude Code only knows "Jev (auto)"
+        p.update(session_id='agentline-demo-jev', model={'id': 'jev', 'display_name': 'Jev (auto)'})
+        p['effort'] = {'level': 'medium'}
     return p
+
+def routed(model, label, effort, confidence, state='routed', mode='', flash='', pin='', issue=''):
+    """automodel's `statusline --json` answer for the jev session."""
+    return json.dumps(dict(v=1, routed=True, alias='jev', model=model, label=label, effort=effort, mode=mode,
+                           state=state, confidence=confidence, pin=pin, issue=issue, flash=flash, text=''))
 
 # The installer's defaults on a machine with a Nerd Font.
 DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='pie', EFFORT_STYLE='dots', ULTRA_EFFECT='violet',
-               BRANCH_ICON='auto', RESET_ICON='auto',
-               SEGMENTS='dir git session meta model effort ctx 5h 7d cache cost lines')
+               BRANCH_ICON='auto', RESET_ICON='auto', THEME='dark', LAYOUT='two', AUTOMODEL='off',
+               SEGMENTS='dir git session meta model effort route ctx 5h 7d cache cost lines')
 
 @functools.lru_cache(maxsize=None)
 def render(cols, scen, frame, opts):
-    env = dict(os.environ, HOME='/home/you', COLUMNS=str(cols), AGENTLINE_CONFIG='/dev/null', AGENTLINE_NOW=str(NOW),
+    env = {k: v for k, v in os.environ.items()   # nothing from this machine's Claude Code or agentline
+           if not k.startswith(('AGENTLINE_', 'CLAUDE_', 'AUTOMODEL_'))}
+    env.update(HOME='/home/you', COLUMNS=str(cols), AGENTLINE_CONFIG='/dev/null', AGENTLINE_NOW=str(NOW),
                AGENTLINE_FRAME=str(frame), AGENTLINE_DEMO_GIT='feat/billing-export 2 1 3 1 0 1',
                XDG_RUNTIME_DIR=tempfile.gettempdir())
     env.update({'AGENTLINE_' + k: v for k, v in opts})
@@ -86,8 +148,8 @@ def render(cols, scen, frame, opts):
 # ── ANSI → pixels ─────────────────────────────────────────────────────────
 SGR = re.compile(r'\x1b\[([0-9;]*)m')
 
-def parse(line):
-    st = dict(fg=FG, bg=None, bold=False, italic=False, dim=False)
+def parse(line, fg0):
+    st = dict(fg=fg0, bg=None, bold=False, italic=False, dim=False)
     cells, pos = [], 0
     for m in SGR.finditer(line + '\x1b[m'):
         for ch in line[pos:m.start()]:
@@ -97,12 +159,12 @@ def parse(line):
         i = 0
         while i < len(codes):
             c = codes[i]
-            if c == 0: st.update(fg=FG, bg=None, bold=False, italic=False, dim=False)
+            if c == 0: st.update(fg=fg0, bg=None, bold=False, italic=False, dim=False)
             elif c == 1: st['bold'] = True
             elif c == 2: st['dim'] = True
             elif c == 3: st['italic'] = True
             elif c == 22: st.update(bold=False, dim=False)
-            elif c == 39: st['fg'] = FG
+            elif c == 39: st['fg'] = fg0
             elif c in (38, 48) and i + 4 < len(codes) and codes[i + 1] == 2:
                 st['fg' if c == 38 else 'bg'] = tuple(codes[i + 2:i + 5]); i += 4
             i += 1
@@ -139,10 +201,10 @@ def block(d, ch, x, y, colour, bgc):
         d.rectangle([x, y, x + w - 0.01, y + h - 0.01], fill=mix(bgc, colour, {'░': .25, '▒': .5, '▓': .75}[ch])); return True
     return False
 
-def draw_line(img, d, x0, y, line):
+def draw_line(img, d, x0, y, line, term):
     x = x0
-    for ch, st in parse(line):
-        fg, bgc = st['fg'], st['bg'] or BG
+    for ch, st in parse(line, term['fg']):
+        fg, bgc = st['fg'], st['bg'] or term['bg']
         if st['dim']: fg = mix(fg, bgc, 0.5)
         span = 2 if wide(ch) else 1
         if st['bg']: d.rectangle([x, y, x + CW * span - 0.01, y + LH - 0.01], fill=st['bg'])
@@ -158,7 +220,8 @@ def draw_line(img, d, x0, y, line):
 
 def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', '', ''), **opts):
     o = dict(DEFAULT); o.update(opts)
-    l1, l2 = render(cols, scen, frame, tuple(sorted(o.items())))
+    status = render(cols, scen, frame, tuple(sorted(o.items())))
+    t = TERM[o['THEME']]
     img = Image.new('RGB', (W, H), PAGE)
     d = ImageDraw.Draw(img)
     # Caption: what is being shown.
@@ -177,13 +240,15 @@ def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', '', ''), **opts):
     if note: d.text((x + 14, 24), note, font=CAP, fill=MUTED)
     # Terminal window, as wide as the simulated terminal.
     tw = cols * CW + 24
-    d.rounded_rectangle([PAD, TOP, PAD + tw, TOP + ROWS * LH + 24], radius=10, fill=BG, outline=BORDER)
+    d.rounded_rectangle([PAD, TOP, PAD + tw, TOP + ROWS * LH + 24], radius=10, fill=t['bg'], outline=t['border'])
     x0, y = PAD + 12, TOP + 12
-    rule = '\x1b[38;2;70;76;72m' + '─' * cols
-    for line in [f'\x1b[38;2;217;223;211m⏺\x1b[m Exported the billing report as CSV and updated its tests.', '',
-                 rule, '\x1b[38;2;127;135;125m❯\x1b[m \x1b[48;2;217;223;211m \x1b[m', rule,
-                 '  ' + l1, '  ' + l2, '  \x1b[38;2;175;135;255m⏵⏵ accept edits on\x1b[38;2;127;135;125m (shift+tab to cycle)\x1b[m']:
-        draw_line(img, d, x0, y, line); y += LH
+    sgr = lambda c: '\x1b[38;2;%d;%d;%dm' % c
+    rule = sgr(t['rule']) + '─' * cols
+    for line in [f'{sgr(t["fg"])}⏺\x1b[m Exported the billing report as CSV and updated its tests.', '',
+                 rule, sgr(t['muted']) + '❯\x1b[m \x1b[48;2;%d;%d;%dm \x1b[m' % t['cursor'], rule,
+                 *['  ' + l for l in status],
+                 f'  {sgr(t["accent"])}⏵⏵ accept edits on{sgr(t["muted"])} (shift+tab to cycle)\x1b[m']:
+        draw_line(img, d, x0, y, line, t); y += LH
     return img
 
 # ── timeline ──────────────────────────────────────────────────────────────
@@ -239,6 +304,24 @@ for effect, n in [('violet', 6), ('rainbow', 6), ('plain', 1)]:
     fade(screen(scen='ultra', frame=0, ULTRA_EFFECT=effect, caption=cap))
     for f in range(n):
         hold(screen(scen='ultra', frame=f, ULTRA_EFFECT=effect, caption=cap), 1000 if n > 1 else 1300)
+# automodel routes each prompt of a "Jev" session; agentline shows what it picked.
+jev = lambda **kw: dict(scen='jev', AUTOMODEL='auto', **kw)
+opus = routed('opus-5.5', 'Opus 5.5', 'xhigh', 0.86)
+show(screen(**jev(AUTOMODEL_JSON=opus), caption=('With automodel', 'routed session',
+            'the model and effort picked for this prompt, and how sure the router is')), 2400)
+cap = ('With automodel · next prompt', 'rerouted', 'flagged for a few seconds')
+fade(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74, flash='switched')), caption=cap))
+hold(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74, flash='switched')), caption=cap), 1800)
+hold(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74)), caption=cap), 900)
+cap = ('With automodel', 'ultracode', 'picked by the router, drawn with AGENTLINE_ULTRA_EFFECT · 1 frame per second')
+for f in range(4):
+    am = routed('opus-5.5', 'Opus 5.5', 'xhigh', 0.91, mode='ultracode', flash='switched' if f < 2 else '')
+    im = screen(**jev(frame=f, AUTOMODEL_JSON=am), caption=cap)
+    if f == 0: fade(im)
+    hold(im, 1000)
+show(screen(**jev(THEME='light', AUTOMODEL_JSON=opus), caption=('AGENTLINE_THEME', 'light', 'for light terminal backgrounds')), 1800)
+show(screen(**jev(LAYOUT='one', AUTOMODEL_JSON=opus),
+            caption=('AGENTLINE_LAYOUT', 'one', 'or your own: "dir git | model route; ctx 5h 7d | cost"')), 1800)
 segs = DEFAULT['SEGMENTS'].split()
 for gone in ['session', 'cost', 'lines', 'cache', 'meta']:
     segs.remove(gone)
