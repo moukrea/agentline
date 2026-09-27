@@ -321,6 +321,15 @@ CHECK_NAME="claude: second install changes nothing"
 check test "$sum1" = "$sum2"
 CHECK_NAME="claude: second install reports unchanged"
 check test "$(grep -c '✓' "$TMP/second.txt")" -eq 0
+CHECK_NAME="claude: statusLine runs bash 5 by its absolute path"
+check bash -c 'b=$(jq -r .statusLine.command "$1"); b=${b%% *}; [[ $b == /* ]] && "$b" -c "((BASH_VERSINFO[0] >= 5))"' _ "$HOME/.claude/settings.json"
+# Releases before 0.5.0 ran a bare `bash` (on macOS, maybe /bin/bash 3.2): the
+# next install names bash 5, and still knows the status line is agentline's.
+jq --arg d "$XDG_DATA_HOME/agentline" '.statusLine.command = "bash \"" + $d + "/claude-statusline.sh\""' \
+    "$HOME/.claude/settings.json" > "$TMP/s.json" && cat "$TMP/s.json" > "$HOME/.claude/settings.json"
+"$ROOT/install.sh" --claude > /dev/null
+CHECK_NAME="claude: a bare bash statusLine is migrated, nothing else changes"
+check test "$(cd "$HOME" && find . -type f -exec sha256sum {} + | sort)" = "$sum2"
 "$ROOT/install.sh" --claude --uninstall >/dev/null
 CHECK_NAME="claude: uninstall restores the previous statusLine and settings"
 check test "$(jq -S . "$HOME/.claude/settings.json")" = "$(jq -S . "$TMP/claude-orig.json")"
@@ -500,6 +509,51 @@ echo 9.9.9 > "$TMP/pkg/agentline-test/VERSION"; tar czf "$TMP/release2.tar.gz" -
 CHECK_NAME="update: new version installed"; check test "$(cat "$BH/home/.local/share/agentline/current/VERSION")" = 9.9.9
 CHECK_NAME="update: --quiet prints nothing"; check test ! -s "$TMP/upd.log"
 CHECK_NAME="update: configuration kept"; check grep -qx 'AGENTLINE_RESET_ICON=mdi-history' "$conf"
+# The latest release: the tag github.com/<repo>/releases/latest redirects to,
+# else the API's; never the main branch. A fake curl plays GitHub and logs the URLs.
+mkdir -p "$TMP/fakegh"
+cat > "$TMP/fakegh/curl" <<'EOF'
+#!/usr/bin/env bash
+url=${*: -1}; echo "$url" >> "$FAKE_LOG"
+case $url in
+    https://api.github.com/*) [ -n "$FAKE_API" ] || exit 22; printf '{\n  "url": "x",\n  "tag_name": "%s",\n  "name": "y"\n}\n' "$FAKE_API" ;;
+    */releases/latest) [ -n "$FAKE_REDIRECT" ] || exit 22; printf '%s' "$FAKE_REDIRECT" ;;
+    https://codeload.github.com/*) cat "$FAKE_TARBALL" ;;
+    *) exit 6 ;;
+esac
+EOF
+chmod +x "$TMP/fakegh/curl"
+echo 9.9.10 > "$TMP/pkg/agentline-test/VERSION"; tar czf "$TMP/release3.tar.gz" -C "$TMP/pkg" agentline-test
+gh_update() { # gh_update <redirect> <API tag> [env...]: agentline update against the fake GitHub
+    local r=$1 a=$2; shift 2; : > "$TMP/gh.log"
+    "${benv[@]}" PATH="$TMP/fakegh:$PATH" AGENTLINE_REPO=me/agentline FAKE_LOG="$TMP/gh.log" FAKE_REDIRECT="$r" FAKE_API="$a" \
+        FAKE_TARBALL="$TMP/release3.tar.gz" "$@" "$BH/home/.local/bin/agentline" update --quiet > "$TMP/gh.out" 2>&1
+}
+cl=https://codeload.github.com/me/agentline/tar.gz
+gh_update "" ""; rc=$?
+CHECK_NAME="update: no release found, fails and says so"; check test $rc -ne 0 -a "$(grep -c 'no release found' "$TMP/gh.out")" -eq 1
+CHECK_NAME="update: no release found, nothing downloaded"; check test "$(grep -c codeload "$TMP/gh.log")" -eq 0
+gh_update https://github.com/me/agentline/releases main; rc=$?
+CHECK_NAME="update: no tag, main refused"; check test $rc -ne 0 -a "$(grep -c codeload "$TMP/gh.log")" -eq 0
+CHECK_NAME="update: no release, still installed"; check test "$(cat "$BH/home/.local/share/agentline/current/VERSION")" = 9.9.9
+gh_update https://github.com/me/agentline/releases/tag/v9.9.10 ""
+CHECK_NAME="update: the tag releases/latest redirects to"; check grep -qx "$cl/v9.9.10" "$TMP/gh.log"
+CHECK_NAME="update: that release installed"; check test "$(cat "$BH/home/.local/share/agentline/current/VERSION")" = 9.9.10
+gh_update https://github.com/me/agentline/releases/tag/v9.9.10 ""
+CHECK_NAME="update: already on the latest release, nothing downloaded"; check test "$(grep -c codeload "$TMP/gh.log")" -eq 0
+gh_update "" v9.9.11
+CHECK_NAME="update: the API's tag when the redirect fails"; check grep -qx "$cl/v9.9.11" "$TMP/gh.log"
+gh_update "" "" AGENTLINE_REF=v9.9.12
+CHECK_NAME="update: AGENTLINE_REF, asked for directly"; check test "$(cat "$TMP/gh.log")" = "$cl/v9.9.12"
+# Release tarballs (.gitattributes export-ignore) hold what the installer copies,
+# not the demo, tools, tests or CI.
+if git -C "$ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+    files=$(git -C "$ROOT" archive --worktree-attributes HEAD | tar t)
+    for f in install.sh VERSION README.md LICENSE claude/statusline.sh codex/preset lib/wizard.sh lib/sample.json bin/agentline; do
+        CHECK_NAME="release tarball: $f"; check grep -qx "$f" <<<"$files"
+    done
+    CHECK_NAME="release tarball: no demo, tools, tests or CI"; check test "$(grep -c '^docs/demo.gif$\|^tools/\|^tests/\|^\.github/' <<<"$files")" -eq 0
+fi
 "${benv[@]}" "$BH/home/.local/bin/agentline" uninstall > /dev/null 2>&1
 CHECK_NAME="uninstall: command removed"; check test ! -e "$BH/home/.local/bin/agentline"
 CHECK_NAME="uninstall: statusLine removed"; check test "$(jq -c '.statusLine // null' "$BH/home/.claude/settings.json")" = null

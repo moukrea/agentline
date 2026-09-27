@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # agentline command: thin wrapper around the installed installer.
 set -euo pipefail
-HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+# Follow the ~/.local/bin symlink by hand: readlink -f is missing from older macOS.
+self=${BASH_SOURCE[0]}
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+HERE=$(cd "$(dirname "$self")/.." && pwd)
 case ${1:-help} in
     update)    shift; exec bash "$HERE/install.sh" --update "$@" ;;
     configure) shift; exec bash "$HERE/install.sh" --configure "$@" ;;

@@ -7,6 +7,25 @@
 # any time, it only rewrites what differs. Each config file it edits is backed
 # up once, before its first change; a status line you had before is kept aside
 # and restored by --uninstall.
+
+# bash 5 first: macOS ships bash 3.2. Everything up to "esac" runs in any bash
+# (and in any sh from a file); the first bash 5 found runs this script instead:
+# this file again, or, piped (curl | bash), the rest of stdin, which bash reads
+# byte by byte and so leaves for the next one.
+case ${BASH_VERSION:-} in
+    [5-9].*|[1-9][0-9]*) ;;
+    *)  s=${BASH_SOURCE:-}   # empty when piped
+        if [ -z "${BASH_VERSION:-}" ]; then   # another sh: $0, if it is a script
+            s=$0 l=""; [ -f "$s" ] && IFS= read -r l < "$s"
+            case $l in '#!'*) ;; *) echo "agentline: run the installer with bash (curl … | bash)" >&2; exit 1 ;; esac
+        fi
+        for b in /opt/homebrew/bin/bash /usr/local/bin/bash /home/linuxbrew/.linuxbrew/bin/bash /opt/local/bin/bash "$(command -v bash)"; do
+            [ -x "$b" ] && "$b" -c '((BASH_VERSINFO[0] >= 5))' 2>/dev/null || continue
+            [ -n "$s" ] && exec "$b" "$s" "$@"
+            exec "$b" -s -- "$@"
+        done
+        echo "agentline needs bash 5 (macOS: brew install bash jq)" >&2; exit 1 ;;
+esac
 set -euo pipefail
 
 REPO=${AGENTLINE_REPO:-moukrea/agentline}
@@ -98,10 +117,38 @@ mirror_items() { # mirror_items "<segments>" → stdout, space-separated
     echo "${out% }"
 }
 
-# fetch_source <dir>: put the agentline sources in <dir>. $AGENTLINE_SOURCE (a
-# directory or .tar.gz) wins, then $AGENTLINE_REF, then the latest release.
+# latest_tag: the tag of the latest release (vX.Y.Z) → REPLY. From where
+# github.com/<repo>/releases/latest redirects (no API rate limit), else from the
+# API; returns 1 when neither names one.
+latest_tag() {
+    local tag
+    tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null) || tag=""
+    tag=${tag##*/}
+    if [[ ! $tag =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+        tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || tag=""
+        [[ $tag =~ ^v[0-9][0-9A-Za-z.+-]*$ ]] || return 1
+    fi
+    REPLY=$tag
+}
+
+# release_ref: what to install → REPLY: $AGENTLINE_REF, else the latest
+# release's tag. Never the unreleased main branch, unless AGENTLINE_REF=main
+# asks for it: says why and returns 1 when no release is found.
+release_ref() {
+    REPLY=${AGENTLINE_REF:-}
+    [ -n "$REPLY" ] && return 0
+    command -v curl >/dev/null || die "curl is required"
+    latest_tag && return 0
+    echo "agentline: no release found at github.com/$REPO (network, or GitHub's rate limit); AGENTLINE_REF=vX.Y.Z picks one" >&2
+    return 1
+}
+
+# fetch_source <dir> [ref]: put the agentline sources in <dir>: those of
+# $AGENTLINE_SOURCE (a directory or .tar.gz) when set, else <ref>'s, by default
+# release_ref's.
 fetch_source() {
-    local dest=$1 ref
+    local dest=$1 ref=${2:-}
     mkdir -p "$dest"
     if [ -n "${AGENTLINE_SOURCE:-}" ]; then
         if [ -d "$AGENTLINE_SOURCE" ]; then cp -R "$AGENTLINE_SOURCE/." "$dest/"
@@ -109,9 +156,8 @@ fetch_source() {
         return
     fi
     command -v curl >/dev/null || die "curl is required"
-    ref=${AGENTLINE_REF:-$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)}
-    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/${ref:-main}" | tar xz -C "$dest" --strip-components=1
+    if [ -z "$ref" ]; then release_ref || return 1; ref=$REPLY; fi
+    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$ref" | tar xz -C "$dest" --strip-components=1 && [ -f "$dest/install.sh" ]
 }
 
 # Piped from curl (no sources next to this script): fetch them, then run the
@@ -119,8 +165,8 @@ fetch_source() {
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)
 if [ ! -f "$SRC/claude/statusline.sh" ]; then
     tmp=$(mktemp -d)
-    fetch_source "$tmp" || die "could not download agentline from github.com/$REPO"
-    AGENTLINE_FETCHED="$tmp" exec bash "$tmp/install.sh" "$@"
+    fetch_source "$tmp" || { rm -rf "$tmp"; die "could not download agentline from github.com/$REPO"; }
+    AGENTLINE_FETCHED="$tmp" exec "$BASH" "$tmp/install.sh" "$@"
 fi
 VERSION=$(cat "$SRC/VERSION" 2>/dev/null || echo dev)
 
@@ -218,16 +264,23 @@ say()  { ((quiet)) || printf '%s\n' "$*"; }
 
 # ── Update: fetch the latest release, hand over to its installer ───────────
 if ((update)); then
-    tmp=$(mktemp -d)
-    fetch_source "$tmp" || { rm -rf "$tmp"; die "update check failed (network, or github.com/$REPO unreachable)"; }
-    new=$(cat "$tmp/VERSION" 2>/dev/null || echo "?")
     installed=$(cat "$DATA/current/VERSION" 2>/dev/null || echo none)
+    ref=""
+    if [ -z "${AGENTLINE_SOURCE:-}" ]; then
+        release_ref || exit 1
+        ref=$REPLY
+        # Already the installed release: nothing to download.
+        if [ "${ref#v}" = "$installed" ] && ((!force)); then say "agentline $installed is up to date."; exit 0; fi
+    fi
+    tmp=$(mktemp -d)
+    fetch_source "$tmp" "$ref" || { rm -rf "$tmp"; die "update failed: could not download agentline${ref:+ $ref} from github.com/$REPO"; }
+    new=$(cat "$tmp/VERSION" 2>/dev/null || echo "?")
     if [ "$new" = "$installed" ] && ((!force)); then
         rm -rf "$tmp"; say "agentline $installed is up to date."; exit 0
     fi
     say "agentline $installed → $new"
     args=(--yes); ((quiet)) && args+=(--quiet)
-    AGENTLINE_FETCHED="$tmp" exec bash "$tmp/install.sh" "${args[@]}"
+    AGENTLINE_FETCHED="$tmp" exec "$BASH" "$tmp/install.sh" "${args[@]}"
 fi
 
 # Targets: explicit flags, else what was installed last time, else what exists.
@@ -256,6 +309,17 @@ backup_once() { # the first backup is the pre-agentline state; never overwritten
 }
 
 # ── Claude Code ────────────────────────────────────────────────────────────
+# The command Claude Code runs: bash 5 by its absolute path, as Claude Code's
+# PATH may find an older bash first (macOS: /bin/bash 3.2), and a bare `bash`
+# from older releases is replaced. A bash 5 the current command already names
+# is kept, so running the installer from another PATH changes nothing.
+statusline_cmd() { # statusline_cmd "<current command>" → REPLY
+    local script="\"$DATA/claude-statusline.sh\"" b=""
+    [[ $1 == *" $script" ]] && b=${1%" $script"} && b=${b#\"} && b=${b%\"}
+    [[ $b == /* && -x $b ]] && "$b" -c '((BASH_VERSINFO[0] >= 5))' 2>/dev/null || b=$BASH
+    [[ $b =~ ^[A-Za-z0-9_./+-]+$ ]] || b="\"$b\""
+    REPLY="$b $script"
+}
 claude_install() {
     say "Claude Code"
     command -v jq >/dev/null || { note "jq is required (apt install jq / brew install jq)"; return 1; }
@@ -263,13 +327,13 @@ claude_install() {
     if write_file "$DATA/claude-statusline.sh" 755 < "$SRC/claude/statusline.sh"; then ok "script → $DATA/claude-statusline.sh"
     else same "script"; fi
 
-    local cmd desired current current_cmd
-    cmd="bash \"$DATA/claude-statusline.sh\""
-    desired=$(jq -cn --arg c "$cmd" '{type: "command", command: $c, refreshInterval: 1}')
+    local desired current current_cmd
     [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
     current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
-    if [ "$current" = "$desired" ]; then same "statusLine in $CLAUDE_SETTINGS"; return 0; fi
     current_cmd=$(jq -r '.statusLine.command? // empty' "$CLAUDE_SETTINGS" 2>/dev/null) || current_cmd=""
+    statusline_cmd "$current_cmd"
+    desired=$(jq -cn --arg c "$REPLY" '{type: "command", command: $c, refreshInterval: 1}')
+    if [ "$current" = "$desired" ]; then same "statusLine in $CLAUDE_SETTINGS"; return 0; fi
     if [ "$current" != null ] && [[ $current != *agentline* ]] && [ ! -e "$DATA/claude-previous-statusline.json" ]; then
         printf '%s\n' "$current" > "$DATA/claude-previous-statusline.json"
         ok "previous statusLine kept for --uninstall"

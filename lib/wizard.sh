@@ -83,9 +83,10 @@ label_of() { # label_of <value> [key]: human label of an option value → REPLY
 # directory is the one you run the assistant from, with its real git state, or a
 # simulated repository when it is not one.
 wiz_snapshot() {
-    local last="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID/last-payload.json"
+    local last="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"   # the renderer's cache directory
+    last="${last%/}/agentline-$UID/last-payload.json"
     WIZ_BASE="$WIZ_TMP/base.json" WIZ_SOURCE="your last Claude Code session"
-    if [ -s "$last" ] && jq -e . "$last" >/dev/null 2>&1; then cp "$last" "$WIZ_BASE"
+    if [ -s "$last" ] && [ -O "$last" ] && [ ! -L "$last" ] && jq -e . "$last" >/dev/null 2>&1; then cp "$last" "$WIZ_BASE"
     else
         WIZ_SOURCE="sample session"
         jq --argjson n "$EPOCHSECONDS" '.prompt_cache.expires_at = $n + .prompt_cache.expires_at
@@ -146,8 +147,8 @@ wiz_compact_width() {
     if [ "$key" != "${WIZ_CW_KEY:-}" ]; then
         WIZ_CW_KEY=$key WIZ_CW=$WIZ_COLS
         differs() { # does <width> show compact gauges?
-            a=$(env "${WIZ_ENV[@]}" COLUMNS="$1" AGENTLINE_COMPACT_STYLE=none bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
-            b=$(env "${WIZ_ENV[@]}" COLUMNS="$1" AGENTLINE_COMPACT_STYLE=dots bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
+            a=$(env "${WIZ_ENV[@]}" COLUMNS="$1" AGENTLINE_COMPACT_STYLE=none "$BASH" "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
+            b=$(env "${WIZ_ENV[@]}" COLUMNS="$1" AGENTLINE_COMPACT_STYLE=dots "$BASH" "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
             [ "$a" != "$b" ]
         }
         if differs 40; then   # binary search for the widest such width
@@ -174,7 +175,7 @@ wiz_render_preview() { # → WIZ_PREVIEW (one line per status line)
     if ((WIZ_WIDTH < 0)); then wiz_compact_width "$payload"; WIZ_WIDTH=$REPLY
         ((WIZ_WIDTH < WIZ_COLS)) && WIZ_NOTE=" · narrowed to show the compact gauges"; fi
     wiz_env
-    WIZ_PREVIEW=$(env "${WIZ_ENV[@]}" COLUMNS="$WIZ_WIDTH" bash "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
+    WIZ_PREVIEW=$(env "${WIZ_ENV[@]}" COLUMNS="$WIZ_WIDTH" "$BASH" "$SRC/claude/statusline.sh" <<<"$payload" 2>/dev/null)
 }
 
 wiz_draw() {
