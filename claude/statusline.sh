@@ -132,8 +132,10 @@ am_discover() { # find automodel in settings.json and probe it → cache
             [[ $line == *statusline*--json* ]] && { am_ok=1; break; }
             ((rc == 0)) || break
         done
-        ((rc > 128)) && kill "$pid" 2>/dev/null
         exec {fd}<&-
+        # Too slow (a cold start, macOS checking a new binary): asked again
+        # next time rather than taken for a release without --json.
+        ((rc > 128)) && { kill "$pid" 2>/dev/null; return 0; }
     fi
     [ -n "$am_cache" ] && { printf 'am_exe=%q am_cfg=%q am_ok=%d\n' "$am_exe" "$am_cfg" "$am_ok" > "$am_cache.$$" \
         && mv -f "$am_cache.$$" "$am_cache"; } 2>/dev/null

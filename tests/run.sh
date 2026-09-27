@@ -253,6 +253,20 @@ out=$(am_render none)
 CHECK_NAME="automodel: absent from settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
 out=$(am_render missing)
 CHECK_NAME="automodel: no settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
+# A first probe too slow to answer (a cold start) is asked again, not cached as "old".
+mkdir -p "$TMP/am-slow/claude"
+{ printf '#!/usr/bin/env bash\nwarm=%q answer=%q\n' "$TMP/am-slow/warm" "$(jq -c . "$ROOT/tests/fixtures/automodel/routed.json")"
+  cat <<'EOF'
+case " $* " in
+    *" help "*) [ -e "$warm" ] || { : > "$warm"; sleep 1.5; }; echo "  automodel statusline --json" ;;
+    *" statusline --json "*) cat > /dev/null; echo "$answer" ;;
+esac
+EOF
+} > "$TMP/am-slow/automodel"; chmod +x "$TMP/am-slow/automodel"
+jq -n --arg c "$TMP/am-slow/automodel hook decide" '{hooks: {UserPromptSubmit: [{hooks: [{type: "command", command: $c}]}]}}' \
+    > "$TMP/am-slow/claude/settings.json"
+am_render slow > /dev/null; out=$(am_render slow)
+CHECK_NAME="automodel: a slow first probe is asked again"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh' <<<"$out"
 
 # automodel's "model" is its catalog key: the label is shown, else the name in its text.
 amx='{"v":1,"routed":true,"alias":"jev","model":"claude-opus-5-5","label":"Opus 5.5","effort":"xhigh","mode":"","state":"routed","confidence":0.86,"pin":"","issue":"","flash":"","text":"jev → opus-5.5·xhigh 0.86"}'
