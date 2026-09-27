@@ -62,7 +62,7 @@ label_of() { # label_of <value> [key]: human label of an option value → REPLY
     case ${2:-}:$1 in
         THEME:dark) REPLY="dark background"; return ;; THEME:light) REPLY="light background"; return ;;
         LAYOUT:two) REPLY="two lines"; return ;; LAYOUT:one) REPLY="one line"; return ;;
-        LAYOUT:custom) REPLY="custom (from config): $WIZ_LAYOUT_CUSTOM"; ((${#REPLY} > 60)) && REPLY="${REPLY:0:59}…"; return ;;
+        LAYOUT:custom) REPLY="custom (from config): $WIZ_LAYOUT_CUSTOM"; ((${#REPLY} > 60)) && REPLY="${REPLY:0:59}…"; return 0 ;;
         AUTOMODEL:auto) REPLY="shown when it routes the session"; return ;; AUTOMODEL:off) REPLY=off; return ;;
     esac
     case $1 in
@@ -265,7 +265,7 @@ wiz_size() {
 }
 
 wizard() {
-    local k v key rest rc saved=0 resized=0 stty_saved=""
+    local k v key rest rc saved=0 resized=0
     WIZ_TMP=$(mktemp -d); mkdir -p "$WIZ_TMP/run"
     printf '%s\n' '{"type":"attachment","attachment":{"type":"ultra_effort_enter"}}' > "$WIZ_TMP/ultra.jsonl"
     # Defaults, then the saved configuration.
@@ -321,7 +321,9 @@ wizard() {
     done
 
     exec 3<"$TTY"
-    stty_saved=$(stty -g <"$TTY" 2>/dev/null) && stty -echo -icanon <"$TTY" 2>/dev/null
+    WIZ_STTY=$(stty -g <"$TTY" 2>/dev/null) && stty -echo -icanon <"$TTY" 2>/dev/null
+    # Whatever happens (an error, Ctrl-C), the terminal is given back as it was.
+    trap 'printf "\e[?25h\e[?1049l"; [ -z "$WIZ_STTY" ] || stty "$WIZ_STTY" <"$TTY" 2>/dev/null; rm -rf "$WIZ_TMP"' EXIT
     printf '\e[?1049h\e[?25l'
     trap 'resized=1' WINCH
     WIZ_CUR=0
@@ -346,9 +348,9 @@ wizard() {
         esac
         wiz_render_preview; wiz_draw
     done
-    trap - WINCH
+    trap - WINCH EXIT
     printf '\e[?25h\e[?1049l'
-    [ -n "$stty_saved" ] && stty "$stty_saved" <"$TTY" 2>/dev/null
+    [ -n "$WIZ_STTY" ] && stty "$WIZ_STTY" <"$TTY" 2>/dev/null
     exec 3<&-
     rm -rf "$WIZ_TMP"
     if ((!saved)); then echo "agentline: setup cancelled, nothing changed." >&2; exit 1; fi

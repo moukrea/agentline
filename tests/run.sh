@@ -438,6 +438,11 @@ migrate 'AGENTLINE_SEGMENTS="dir model"' --segments "dir ctx"
 CHECK_NAME="migration: --segments wins"; check grep -qx 'AGENTLINE_SEGMENTS="dir ctx"' "$aconf"
 migrate '# no segments'
 CHECK_NAME="migration: no saved parts, nothing added"; check test "$(grep -c SEGMENTS "$aconf")" -eq 0
+# The assistant shows a custom layout from the config, and keeps it.
+mkdir -p "${aconf%/*}"; printf 'AGENTLINE_CONFIG_VERSION=2\nAGENTLINE_LAYOUT="dir | model"\n' > "$aconf"; printf '\n' > "$TMP/enter"
+"${aenv[@]}" AGENTLINE_TTY="$TMP/enter" COLUMNS=100 "$ROOT/install.sh" --claude --configure > "$TMP/custom.log" 2>&1; rc=$?
+CHECK_NAME="assistant: a custom layout from the config, shown and kept"
+check test $rc -eq 0 -a "$(grep -c '^AGENTLINE_LAYOUT="dir | model"$' "$aconf")" -eq 1 -a "$(grep -c 'custom (from config): dir | model' "$TMP/custom.log")" -ge 1
 for bad in "--theme blue" "--automodel on" "--layout bogus" '--layout dir$x'; do
     # shellcheck disable=SC2086  # "<flag> <value>"
     "${aenv[@]}" "$ROOT/install.sh" --claude --yes $bad > /dev/null 2>&1; rc=$?
