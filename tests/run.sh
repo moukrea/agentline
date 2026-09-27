@@ -227,6 +227,23 @@ CHECK_NAME="automodel: absent from settings.json, not routed"; check test ! -s "
 out=$(am_render missing)
 CHECK_NAME="automodel: no settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
 
+# automodel's "model" is its catalog key: the label is shown, else the name in its text.
+amx='{"v":1,"routed":true,"alias":"jev","model":"claude-opus-5-5","label":"Opus 5.5","effort":"xhigh","mode":"","state":"routed","confidence":0.86,"pin":"","issue":"","flash":"","text":"jev → opus-5.5·xhigh 0.86"}'
+labelled() { # labelled <jq edit of the answer> → the first line, plain text
+    env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$(jq -c "$1" <<<"$amx")" COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" 2>"$TMP/err" \
+        | head -1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+out=$(labelled .)
+CHECK_NAME="routed: the label, not the catalog key"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86$' <<<"$out"
+out=$(labelled '.label = ""')
+CHECK_NAME="routed, no label: the name in its text"; check grep -q 'jev → opus-5.5 ●●●●○ xhigh  0.86$' <<<"$out"
+out=$(labelled '.label = "" | .effort = "" | .state = "default" | .text = "jev → opus-5.5 (default)"')
+CHECK_NAME="routed, no label nor effort: the name in its text"; check grep -q 'jev → opus-5.5  default$' <<<"$out"
+out=$(labelled '.label = null | del(.text)')
+CHECK_NAME="routed, no label nor text: Claude Code's model"; check grep -q 'Jev (auto) ●●○○○ medium  0.86$' <<<"$out"
+CHECK_NAME="routed: the catalog key never shown, no stderr"
+check test -z "$(for e in . '.label = ""' '.label = null | del(.text)'; do labelled "$e"; done | grep claude-opus)" -a ! -s "$TMP/err"
+
 # The cache directory (some of its files are sourced) must be ours alone: in a
 # shared /tmp another user can create agentline-<uid> first. A directory that
 # isn't ours is simulated by a symlink (no chown here). Then nothing there is

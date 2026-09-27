@@ -99,7 +99,7 @@ declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 am_fd="" am_pid="" am_routed=0
 AM_JQ='def s: (. // "" | tostring | explode | map(select(. >= 32 and . != 127)) | implode);   # no control characters
   if type == "object" and .v == 1 and .routed == true then
-    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then . * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_routed=1"
+    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then . * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_text=\(.text | s) am_routed=1"
   else "am_routed=0" end'
 am_discover() { # find automodel in settings.json and probe it → cache
     local cmd="" line fd pid rc=0 v val
@@ -590,9 +590,16 @@ fi
 # ── Model and effort: routed by automodel, else Claude Code's own ─────────
 am_read
 ultra=0 arrow=""
-if ((am_routed)) && [ -n "${am_label:-$am_model}" ]; then
+# automodel names its model by the catalog label ("Opus 5.5"). Its "model" is
+# the catalog key, never shown: without a label, the short name its text shows
+# ("jev → opus-5.5·xhigh 0.86"); without either, Claude Code's model and effort.
+am_name=${am_label:-}
+if ((am_routed)) && [ -z "$am_name" ] && [ -n "${am_model:-}" ] && [[ ${am_text:-} == *"→ "* ]]; then
+    am_name=${am_text#*→ }; am_name=${am_name%%·*}; am_name=${am_name%% *}
+fi
+if ((am_routed)) && [ -n "$am_name" ]; then
     # "jev → Opus 5.5" with the effort (and mode) automodel chose.
-    model=${am_label:-$am_model} effort=$am_effort
+    model=$am_name effort=$am_effort
     arrow="${LABEL}${am_alias:+$am_alias }→${RST} "
     [ "$am_mode" = ultracode ] && ultra=1
 elif [ "$effort" = xhigh ]; then
