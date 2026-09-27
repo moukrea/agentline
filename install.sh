@@ -22,6 +22,8 @@ case ${BASH_VERSION:-} in
         for b in /opt/homebrew/bin/bash /usr/local/bin/bash /home/linuxbrew/.linuxbrew/bin/bash /opt/local/bin/bash "$(command -v bash)"; do
             [ -x "$b" ] && "$b" -c '((BASH_VERSINFO[0] >= 5))' 2>/dev/null || continue
             [ -n "$s" ] && exec "$b" "$s" "$@"
+            # bash -c "$(curl …)": the script is that string, not stdin.
+            [ -n "${BASH_EXECUTION_STRING:-}" ] && exec "$b" -c "$BASH_EXECUTION_STRING" "$0" "$@"
             exec "$b" -s -- "$@"
         done
         echo "agentline needs bash 5 (macOS: brew install bash jq)" >&2; exit 1 ;;
