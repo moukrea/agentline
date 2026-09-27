@@ -89,7 +89,7 @@ CHECK_NAME="medium effort shown without ultracode"; check grep -q 'medium' <<<"$
 UP="$TMP/upd"; mkdir -p "$UP/share/agentline/current/bin" "$TMP/nosetsid"
 printf '#!/bin/sh\necho "$*" > %q\n' "$TMP/update-ran" > "$UP/share/agentline/current/bin/agentline"
 chmod +x "$UP/share/agentline/current/bin/agentline"
-for t in jq git ps stty sed mkdir mv; do ln -sf "$(command -v "$t")" "$TMP/nosetsid/$t"; done
+for t in cat jq git ps stty sed mkdir mv; do ln -sf "$(command -v "$t")" "$TMP/nosetsid/$t"; done
 env PATH="$TMP/nosetsid" XDG_DATA_HOME="$UP/share" AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTO_UPDATE=1 COLUMNS=100 \
     "$BASH" "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" > /dev/null 2>&1
 for _ in $(seq 50); do [ -s "$TMP/update-ran" ] && break; sleep 0.1; done
