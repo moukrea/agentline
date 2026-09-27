@@ -509,6 +509,12 @@ sumA=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
 (cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" bash -s -- --yes < "$ROOT/install.sh" > /dev/null 2>&1)
 sumB=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
 CHECK_NAME="bootstrap: second curl | bash changes nothing"; check test "$sumA" = "$sumB"
+# Piped, there is no script file: a claude/statusline.sh in the current
+# directory (dotfiles) is not agentline's, the release is installed.
+mkdir -p "$TMP/dotfiles/claude"; echo 'echo not-agentline' > "$TMP/dotfiles/claude/statusline.sh"
+(cd "$TMP/dotfiles" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" bash -s -- --yes < "$ROOT/install.sh" > /dev/null 2>&1)
+CHECK_NAME="bootstrap: piped in a directory with a claude/statusline.sh, the release is installed"
+check cmp -s "$BH/home/.local/share/agentline/claude-statusline.sh" "$ROOT/claude/statusline.sh"
 out=$("${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" "$BH/home/.local/bin/agentline" update 2>&1)
 CHECK_NAME="update: same version is up to date"; check grep -q 'up to date' <<<"$out"
 echo 9.9.9 > "$TMP/pkg/agentline-test/VERSION"; tar czf "$TMP/release2.tar.gz" -C "$TMP/pkg" agentline-test

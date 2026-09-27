@@ -161,9 +161,11 @@ fetch_source() {
 }
 
 # Piped from curl (no sources next to this script): fetch them, then run the
-# installer they contain with the same arguments.
-SRC=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)
-if [ ! -f "$SRC/claude/statusline.sh" ]; then
+# installer they contain with the same arguments. Piped, there is no script
+# file: never the current directory, which may hold another claude/statusline.sh.
+SRC=""
+[ -n "${BASH_SOURCE[0]:-}" ] && SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
+if [ -z "$SRC" ] || [ ! -f "$SRC/claude/statusline.sh" ]; then
     tmp=$(mktemp -d)
     fetch_source "$tmp" || { rm -rf "$tmp"; die "could not download agentline from github.com/$REPO"; }
     AGENTLINE_FETCHED="$tmp" exec "$BASH" "$tmp/install.sh" "$@"
