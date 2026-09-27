@@ -10,7 +10,7 @@
 # Configuration: ${XDG_CONFIG_HOME:-~/.config}/agentline/config (shell syntax),
 # overridable by the same AGENTLINE_* variables in the environment.
 # shellcheck disable=SC2154  # payload variables are assigned by the jq eval below
-shopt -s extglob
+set -f   # no pathname expansion anywhere: unquoted expansions only split words
 export LC_ALL=C.UTF-8
 
 input=$(cat)
@@ -136,7 +136,9 @@ hue() {
     REPLY="$r;$g;$b"
 }
 
-vis() { local s=${1//$'\e['*([0-9;])m/}; REPLY=${#s}; }
+# Display width: the text between escape sequences (all of them "\e[…m").
+# shellcheck disable=SC2206  # split on ESC, globbing is off
+vis() { local IFS=$'\e' a t; a=($1); t=${a[0]}; a[0]=; printf -v t '%s' "$t" "${a[@]#*m}"; REPLY=${#t}; }
 
 # Heat gradient green → yellow → red for p in 0..100
 grad() {
