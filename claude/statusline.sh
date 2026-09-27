@@ -312,7 +312,7 @@ gauge() {
         pie)
             cell_colour "$col" $((pm / 10))
             if [ "$GLYPHS" = nerd ]; then REPLY="$REPLY${PIE_NERD[(pm * 8 + 999) / 1000]}$G"
-            else REPLY="$REPLY${PIE_UNI[(pm * 4 + 249) / 250]}"; fi
+            else REPLY="$REPLY${PIE_UNI[(pm * 4 + 999) / 1000]}"; fi
             [ "$col" = plain ] || REPLY+=$RST; return ;;
         ramp|dots|bars|squares)
             [ "$style" = ramp ] && w=5   # a ramp is five steps, whatever the room

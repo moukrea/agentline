@@ -124,6 +124,13 @@ three=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='dir; model; ctx | cost' COL
 CHECK_NAME="layout custom: three lines"; check test "$(printf '%s\n' "$three" | wc -l)" -eq 3
 none=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='bogus | nothing' COLUMNS=100 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
 CHECK_NAME="layout custom: nothing known falls back to two lines"; check test "$(printf '%s\n' "$none" | wc -l)" -eq 2
+pies=$(for u in 0 50000 300000 600000 950000; do
+    jq --argjson u "$u" '.context_window.current_usage = {input_tokens: $u}' "$ROOT/tests/fixtures/session.json" \
+        | AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode AGENTLINE_BAR=pie AGENTLINE_SEGMENTS=ctx COLUMNS=100 \
+          bash "$ROOT/claude/statusline.sh" | tail -n 1 | sed 's/\x1b\[[0-9;]*m//g'
+done | paste -sd'|' -)
+CHECK_NAME="pie, unicode: a slice per quarter ($pies)"
+check test "$pies" = "context ○ 0%|context ◔ 5%|context ◑ 30%|context ◕ 60%|context ● 95%"
 
 # ── automodel routing ──────────────────────────────────────────────────────
 echo "automodel"
