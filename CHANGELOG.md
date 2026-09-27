@@ -13,8 +13,8 @@ All notable changes to agentline. Versions follow [Semantic Versioning](https://
   `⚠ fallback`, `⚠ catalog`, `⚠ budget` (over automodel's spending cap),
   `⚠ jev: <why>` and `↻ switched|compact|cold`.
   automodel is found through its hook in `settings.json` and asked with
-  `automodel statusline --json` while the rest renders (0.8 s at most); releases
-  without `--json` are never called. `AGENTLINE_AUTOMODEL=auto|off`,
+  `automodel statusline --json` (automodel 0.7.0 or later) while the rest
+  renders (0.8 s at most); older releases are never called. `AGENTLINE_AUTOMODEL=auto|off`,
   `AGENTLINE_AUTOMODEL_JSON` for a fixed answer.
 - **Themes**: `AGENTLINE_THEME=light` for terminals with a light background.
 - **Layouts**: `AGENTLINE_LAYOUT=one` for a single line, or a custom spec

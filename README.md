@@ -284,7 +284,7 @@ no broken line. Where automodel lives, and whether it is recent enough, is cache
 until `settings.json` or the automodel binary changes, so without automodel a
 render costs no extra process.
 
-automodel releases without `statusline --json` are detected (from `automodel help`)
+automodel releases before 0.7.0 (without `statusline --json`) are detected (from `automodel help`)
 and never called: update automodel to see its routing.
 
 ### Install order
