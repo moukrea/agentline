@@ -256,6 +256,99 @@ check test "$(grep -c '✓' "$TMP/second.txt")" -eq 0
 CHECK_NAME="claude: uninstall restores the previous statusLine and settings"
 check test "$(jq -S . "$HOME/.claude/settings.json")" = "$(jq -S . "$TMP/claude-orig.json")"
 
+# ── Options, config migration, automodel's status line ─────────────────────
+echo "options and automodel install"
+AH="$TMP/amh"; mkdir -p "$AH/home/.claude"
+aenv=(env HOME="$AH/home" XDG_CONFIG_HOME="$AH/home/.config" XDG_DATA_HOME="$AH/home/.local/share" XDG_RUNTIME_DIR="$TMP/amrun")
+aconf="$AH/home/.config/agentline/config" asettings="$AH/home/.claude/settings.json"
+am_cmd="$TMP/am-new/bin/automodel --config $TMP/am-new/config.toml"
+with_am() { # with_am <statusLine JSON or null> → settings.json with automodel's hooks
+    jq -n --arg d "$am_cmd hook decide" --argjson s "$1" '{model: "opus", permissions: {allow: ["Workflow"]}}
+        + (if $s then {statusLine: $s} else {} end)
+        + {hooks: {UserPromptSubmit: [{hooks: [{type: "command", command: $d, timeout: 15}]}]}}' > "$asettings"
+}
+with_am "$(jq -cn --arg c "$am_cmd statusline" '{type: "command", command: $c}')"
+cp "$asettings" "$TMP/am-orig.json"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes --theme light --layout "dir git | model route; ctx 5h 7d" --automodel off > "$TMP/am-install.log" 2>&1; rc=$?
+CHECK_NAME="options: exit 0"; check test $rc -eq 0
+for kv in THEME=light 'LAYOUT="dir git | model route; ctx 5h 7d"' AUTOMODEL=off CONFIG_VERSION=2; do
+    CHECK_NAME="options: AGENTLINE_$kv saved"; check grep -qxF "AGENTLINE_$kv" "$aconf"
+done
+CHECK_NAME="over automodel: agentline's statusLine"; check grep -q 'agentline/claude-statusline.sh' "$asettings"
+CHECK_NAME="over automodel: automodel's statusLine kept for --uninstall"
+check test "$(jq -c . "$AH/home/.local/share/agentline/claude-previous-statusline.json")" = "$(jq -c .statusLine "$TMP/am-orig.json")"
+CHECK_NAME="over automodel: says agentline shows the routing"; check grep -q "agentline now shows automodel's routing itself" "$TMP/am-install.log"
+CHECK_NAME="over automodel: says the routing is off"; check grep -q 'AGENTLINE_AUTOMODEL=off hides it' "$TMP/am-install.log"
+: > "$TMP/am-new/argv"
+out=$("${aenv[@]}" COLUMNS=160 bash "$AH/home/.local/share/agentline/claude-statusline.sh" <<<"$jev" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="options: the saved layout is used"; check test "$(printf '%s
+' "$out" | wc -l)" -eq 2 -a "$(grep -c 'cache\|edits' <<<"$out")" -eq 0
+CHECK_NAME="options: automodel off, never called"; check test ! -s "$TMP/am-new/argv"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes --automodel auto > /dev/null 2>&1
+out=$("${aenv[@]}" COLUMNS=160 bash "$AH/home/.local/share/agentline/claude-statusline.sh" <<<"$jev" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="options: automodel auto, its routing shown"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86' <<<"$out"
+sum1=$(cd "$AH/home" && find . -type f -exec sha256sum {} + | sort)
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/am-second.log" 2>&1
+sum2=$(cd "$AH/home" && find . -type f -exec sha256sum {} + | sort)
+CHECK_NAME="over automodel: second install changes nothing"; check test "$sum1" = "$sum2"
+CHECK_NAME="over automodel: second install reports unchanged, no note"; check test "$(grep -v 'in your PATH' "$TMP/am-second.log" | grep -c '✓\|!')" -eq 0
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/am-uninstall.log" 2>&1
+CHECK_NAME="over automodel: uninstall gives automodel its statusLine back"
+check test "$(jq -S . "$asettings")" = "$(jq -S . "$TMP/am-orig.json")"
+# The other order: your status line, agentline, then automodel.
+jq -n '{statusLine: {type: "command", command: "~/bin/my-line \"x\""}}' > "$asettings"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
+with_am "$(jq -c .statusLine "$asettings")"
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/am-uninstall2.log" 2>&1
+CHECK_NAME="automodel after agentline: uninstall sets automodel's statusLine, from its hook"
+check test "$(jq -c .statusLine "$asettings")" = "$(jq -cn --arg c "$am_cmd statusline" '{type: "command", command: $c}')"
+CHECK_NAME="automodel after agentline: says so"; check grep -q "statusLine → automodel's" "$TMP/am-uninstall2.log"
+CHECK_NAME="automodel after agentline: tells how to chain your status line"
+check grep -qF 'statusline_command = "~/bin/my-line \"x\""' "$TMP/am-uninstall2.log"
+CHECK_NAME="automodel after agentline: names automodel's config"; check grep -qF "$TMP/am-new/config.toml" "$TMP/am-uninstall2.log"
+# automodel's status line kept aside, but automodel uninstalled since: removed.
+with_am "$(jq -cn --arg c "$am_cmd statusline" '{type: "command", command: $c}')"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
+jq 'del(.hooks)' "$asettings" > "$TMP/s.json" && mv "$TMP/s.json" "$asettings"
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > /dev/null 2>&1
+CHECK_NAME="automodel gone: its status line is not restored"; check test "$(jq -c '.statusLine // null' "$asettings")" = null
+# Without automodel's hooks, uninstall restores exactly what was there.
+jq -n '{statusLine: {type: "command", command: "mine"}}' > "$asettings"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > /dev/null 2>&1
+CHECK_NAME="no automodel: uninstall restores your status line"; check test "$(jq -c .statusLine "$asettings")" = '{"type":"command","command":"mine"}'
+# Configs from before 0.5.0: a saved list of parts gets "route", once.
+migrate() { # migrate "<segments line>" [install options...] → the config afterwards
+    local line=$1; shift
+    printf '# old\nAGENTLINE_GLYPHS=unicode\n%s\nAGENTLINE_AUTO_UPDATE=0\n' "$line" > "$aconf"
+    "${aenv[@]}" "$ROOT/install.sh" --claude --yes "$@" > "$TMP/migrate.log" 2>&1
+}
+migrate 'AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines"'
+CHECK_NAME="migration: route after effort"; check grep -qx 'AGENTLINE_SEGMENTS="dir git session meta model effort route ctx 5h 7d cache cost lines"' "$aconf"
+CHECK_NAME="migration: version 2"; check test "$(grep -cx 'AGENTLINE_CONFIG_VERSION=2' "$aconf")" -eq 1
+CHECK_NAME="migration: the rest of the config kept"; check test "$(grep -c '^# old$\|^AGENTLINE_GLYPHS=unicode$\|^AGENTLINE_AUTO_UPDATE=0$' "$aconf")" -eq 3
+CHECK_NAME="migration: reported"; check grep -q 'route (automodel) added' "$TMP/migrate.log"
+c1=$(sha256sum < "$aconf")
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/migrate2.log" 2>&1
+CHECK_NAME="migration: once only"; check test "$c1" = "$(sha256sum < "$aconf")"
+CHECK_NAME="migration: second run reports the config unchanged"; check grep -q 'config (.*(unchanged)' "$TMP/migrate2.log"
+sed -i 's/ route//' "$aconf"; "${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
+CHECK_NAME="migration: route removed afterwards stays removed"; check grep -qx 'AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines"' "$aconf"
+migrate 'AGENTLINE_SEGMENTS="dir model ctx"'
+CHECK_NAME="migration: route after the model without effort"; check grep -qx 'AGENTLINE_SEGMENTS="dir model route ctx"' "$aconf"
+migrate 'AGENTLINE_SEGMENTS=dir'
+CHECK_NAME="migration: no model, no route"; check grep -qx 'AGENTLINE_SEGMENTS=dir' "$aconf"
+CHECK_NAME="migration: no model, version 2"; check grep -qx 'AGENTLINE_CONFIG_VERSION=2' "$aconf"
+migrate 'AGENTLINE_SEGMENTS="dir model"' --segments "dir ctx"
+CHECK_NAME="migration: --segments wins"; check grep -qx 'AGENTLINE_SEGMENTS="dir ctx"' "$aconf"
+migrate '# no segments'
+CHECK_NAME="migration: no saved parts, nothing added"; check test "$(grep -c SEGMENTS "$aconf")" -eq 0
+for bad in "--theme blue" "--automodel on" "--layout bogus" '--layout dir$x'; do
+    # shellcheck disable=SC2086  # "<flag> <value>"
+    "${aenv[@]}" "$ROOT/install.sh" --claude --yes $bad > /dev/null 2>&1; rc=$?
+    CHECK_NAME="options: $bad refused"; check test $rc -eq 2
+done
+
 # ── Codex ──────────────────────────────────────────────────────────────────
 echo "codex"
 toml_ok() { python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$1"; }
@@ -306,20 +399,25 @@ benv=(env HOME="$BH/home" XDG_CONFIG_HOME="$BH/home/.config" XDG_DATA_HOME="$BH/
 mkdir -p "$TMP/pkg/agentline-test"
 cp -R "$ROOT"/{install.sh,VERSION,README.md,LICENSE,claude,codex,lib,bin} "$TMP/pkg/agentline-test/"
 tar czf "$TMP/release.tar.gz" -C "$TMP/pkg" agentline-test
-# Keys for the assistant: ↓ → on each setting, then hide "Session name", Enter.
+# Keys for the assistant: ↓ → on each setting (glyphs, theme, layout, bars,
+# compact, effort, ultracode, branch, reset, updates), hide "Session name",
+# then ↓ past the other parts to "automodel routing" and turn it off, Enter.
 D=$'\e[B' R=$'\e[C' L=$'\e[D'
-printf '%s' "$D" "$D$R" "$D$R" "$D$L" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " $'\n' > "$TMP/answers"
+printf '%s' "$D" "$D$R" "$D$R" "$D$R" "$D$R" "$D$L" "$D$R" "$D" "$D$R" "$D$R" "$D$D$D " "$D$D$D$D$D$D$D$D$D$D$D$R" $'\n' > "$TMP/answers"
+lp="$TMP/run/agentline-$UID/last-payload.json"; lp0=$(cat "$lp" 2>/dev/null)
 (cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" AGENTLINE_TTY="$TMP/answers" COLUMNS=100 \
-    bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1)
-CHECK_NAME="bootstrap: exit 0"; check test $? -eq 0
+    bash -s -- --claude < "$ROOT/install.sh" > "$TMP/boot.log" 2>&1); rc=$?
+CHECK_NAME="bootstrap: exit 0"; check test $rc -eq 0
 conf="$BH/home/.config/agentline/config"
 for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=none EFFORT_STYLE=ramp ULTRA_EFFECT=plain \
-          BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0; do
+          BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0 THEME=light LAYOUT=one AUTOMODEL=off CONFIG_VERSION=2; do
     CHECK_NAME="assistant: $kv saved"; check grep -qx "AGENTLINE_$kv" "$conf"
 done
 CHECK_NAME="assistant: session name hidden"
-check grep -qx 'AGENTLINE_SEGMENTS="dir git meta model effort ctx 5h 7d cache cost lines"' "$conf"
+check grep -qx 'AGENTLINE_SEGMENTS="dir git meta model effort route ctx 5h 7d cache cost lines"' "$conf"
 CHECK_NAME="assistant: preview drawn"; check grep -q 'Preview' "$TMP/boot.log"
+CHECK_NAME="assistant: automodel routing previewed on its row"; check grep -q 'showing a session routed by automodel' "$TMP/boot.log"
+CHECK_NAME="assistant: previews leave the last session alone"; check test "$(cat "$lp" 2>/dev/null)" = "$lp0"
 CHECK_NAME="bootstrap: agentline command"; check test -x "$BH/home/.local/bin/agentline"
 CHECK_NAME="bootstrap: statusLine set"; check grep -q 'agentline/claude-statusline.sh' "$BH/home/.claude/settings.json"
 sumA=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)

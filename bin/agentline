@@ -10,11 +10,15 @@ case ${1:-help} in
     version)   cat "$HERE/VERSION" ;;
     *) cat <<'USAGE'
 Usage: agentline <command>
-  configure    Choose glyphs, bars and icons again, with previews
+  configure    Choose the look, theme, layout, parts shown and automodel routing
+               again, with a live preview
   update       Install the latest release if newer (--force to reinstall)
-  install      Re-run the installer (accepts installer options, see --help)
+  install      Re-run the installer with options, e.g. --theme light, --layout one,
+               --automodel off (agentline install --help lists them all)
   uninstall    Remove agentline and restore previous status lines (--purge: also the config)
   version      Print the installed version
+
+Configuration: ~/.config/agentline/config
 USAGE
     ;;
 esac

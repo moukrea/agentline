@@ -8,6 +8,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck
-        run: shellcheck -S warning install.sh claude/statusline.sh tests/run.sh
+        run: shellcheck -S warning install.sh claude/statusline.sh lib/wizard.sh bin/agentline tests/run.sh
       - name: Tests
         run: tests/run.sh

@@ -34,6 +34,56 @@ have_nerd_font() {
     return 1
 }
 
+# Parts (segments) and layout names, as the renderer knows them.
+ALL_SEGMENTS="dir git session meta model effort route ctx 5h 7d cache cost lines"
+LAYOUT_SEGMENTS=" dir git session meta model effort route ctx 5h 7d cache cost lines "
+
+# Configs before version 2 may list their parts without "route" (the setup
+# assistant always saved the full list): it goes right after the effort, else
+# after the model, else nowhere.
+with_route() { # with_route "<segments>" → REPLY
+    local s out="" w=model words
+    read -ra words <<<"$1"
+    for s in "${words[@]}"; do
+        [ "$s" = route ] && { REPLY=$1; return; }
+        [ "$s" = effort ] && w=effort
+    done
+    for s in "${words[@]}"; do out+="$s "; [ "$s" = "$w" ] && out+="route "; done
+    REPLY=${out% }
+}
+
+# automodel, found like the renderer finds it: its UserPromptSubmit hook
+# "<exe> --config <cfg> hook decide" in settings.json. → AM_CMD ("<exe> --config
+# <cfg>", as written there), AM_EXE, AM_CFG; returns 1 when absent.
+am_find() { # am_find [settings.json]
+    local f=${1:-$CLAUDE_SETTINGS} cmd="" v val
+    AM_CMD="" AM_EXE="" AM_CFG=""
+    [ -r "$f" ] && command -v jq >/dev/null || return 1
+    cmd=$(jq -r 'first((.hooks.UserPromptSubmit? // [])[]?.hooks[]?.command? | strings
+        | select(contains("automodel") and endswith(" hook decide"))) // empty' "$f" 2>/dev/null) || cmd=""
+    [ -n "$cmd" ] || return 1
+    AM_CMD=${cmd% hook decide}
+    case $AM_CMD in *" --config "*) AM_EXE=${AM_CMD%% --config *} AM_CFG=${AM_CMD#* --config } ;; *) AM_EXE=$AM_CMD ;; esac
+    for v in AM_EXE AM_CFG; do   # as a shell would read them: quotes, ~/
+        val=${!v}
+        case $val in \"*\"|\'*\') val=${val:1:${#val}-2} ;; esac
+        case $val in \~/*) val=$HOME/${val#\~/} ;; esac
+        printf -v "$v" '%s' "$val"
+    done
+    [[ $AM_EXE == */* ]] || AM_EXE=$(type -P "$AM_EXE" || echo "$AM_EXE")
+    return 0
+}
+# Does this automodel release have `statusline --json`? Older ones would run
+# their chained status line instead, so agentline never calls them.
+am_has_json() {
+    [ -x "$AM_EXE" ] || return 1
+    local t=(); command -v timeout >/dev/null && t=(timeout 3)
+    "${t[@]}" "$AM_EXE" help </dev/null 2>/dev/null | grep -q 'statusline.*--json'
+}
+is_am_statusline() { # is_am_statusline "<command>": automodel's own status line?
+    [[ $1 == *automodel* && $1 == *" statusline" ]]
+}
+
 # Codex items closest to the Claude Code segments shown (the "mirror" option).
 mirror_items() { # mirror_items "<segments>" → stdout, space-separated
     local s=" $1 " out=""
@@ -92,7 +142,12 @@ Options
   --effort-style STYLE  effort gauge, same styles, or auto = like the bars (default: dots)
   --compact-style STYLE gauges on narrow terminals, same styles (default: pie)
   --ultra-effect E      rainbow | violet | plain
-  --segments "LIST"     Shown parts, among: dir git session meta model effort ctx 5h 7d cache cost lines
+  --segments "LIST"     Shown parts, among: dir git session meta model effort route ctx 5h 7d cache cost lines
+  --theme THEME         dark (default) | light: the terminal's background
+  --layout LAYOUT       two (default) | one | a custom "left | right; left | right" spec
+                        (lines separated by ";", parts from the list above)
+  --automodel auto|off  auto (default): when automodel routes the session, show the
+                        model and effort it chose and how (the route part) | off
   --codex-mirror on|off Codex shows the items closest to the Claude Code parts shown
   --auto-update on|off  One background update check a day
   --update              Install the latest release if it is newer (--force: always)
@@ -113,6 +168,19 @@ choice() { # choice <flag> <value> <allowed...>
     for a in "$@"; do [ "$value" = "$a" ] && return 0; done
     echo "agentline: invalid value '$value' for $flag (allowed: $*)" >&2; exit 2
 }
+safe() { # safe <flag> <value>: written between double quotes in the config
+    case $2 in *[\"\\\$\`]*|*$'\n'*) echo "agentline: $1 cannot contain \", \\, \$, \` or a newline" >&2; exit 2 ;; esac
+}
+layout_ok() { # two, one, or a spec naming at least one known part
+    local s known="" words
+    case $1 in two|one) return 0 ;; esac
+    safe --layout "$1"
+    read -ra words <<<"${1//[|;]/ }"
+    for s in "${words[@]}"; do [[ $LAYOUT_SEGMENTS == *" $s "* ]] && known=1; done
+    [ -n "$known" ] && return 0
+    echo "agentline: invalid --layout '$1': two, one, or lines like \"dir git | model route; ctx 5h 7d | cost\"" >&2
+    echo "  (parts: $ALL_SEGMENTS)" >&2; exit 2
+}
 while [ $# -gt 0 ]; do
     case $1 in
         --claude) do_claude=1 ;;
@@ -125,7 +193,10 @@ while [ $# -gt 0 ]; do
         --effort-style) choice "$1" "${2-}" auto capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[EFFORT_STYLE]=$2; shift ;;
         --compact-style) choice "$1" "${2-}" capsule smooth blocks line segments braille ramp dots bars squares pie none; SET[COMPACT_STYLE]=$2; shift ;;
         --ultra-effect) choice "$1" "${2-}" rainbow violet plain; SET[ULTRA_EFFECT]=$2; shift ;;
-        --segments) SET[SEGMENTS]=${2-}; shift ;;
+        --segments) safe "$1" "${2-}"; SET[SEGMENTS]=$2; shift ;;
+        --theme) choice "$1" "${2-}" dark light; SET[THEME]=$2; shift ;;
+        --layout) layout_ok "${2-}"; SET[LAYOUT]=$2; shift ;;
+        --automodel) choice "$1" "${2-}" auto off; SET[AUTOMODEL]=$2; shift ;;
         --codex-mirror) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[CODEX_MIRROR]=1 || SET[CODEX_MIRROR]=0; shift ;;
         --auto-update) choice "$1" "${2-}" on off; [ "$2" = on ] && SET[AUTO_UPDATE]=1 || SET[AUTO_UPDATE]=0; shift ;;
         --update) update=1 ;;
@@ -192,12 +263,13 @@ claude_install() {
     if write_file "$DATA/claude-statusline.sh" 755 < "$SRC/claude/statusline.sh"; then ok "script → $DATA/claude-statusline.sh"
     else same "script"; fi
 
-    local cmd desired current
+    local cmd desired current current_cmd
     cmd="bash \"$DATA/claude-statusline.sh\""
     desired=$(jq -cn --arg c "$cmd" '{type: "command", command: $c, refreshInterval: 1}')
     [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
     current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
     if [ "$current" = "$desired" ]; then same "statusLine in $CLAUDE_SETTINGS"; return 0; fi
+    current_cmd=$(jq -r '.statusLine.command? // empty' "$CLAUDE_SETTINGS" 2>/dev/null) || current_cmd=""
     if [ "$current" != null ] && [[ $current != *agentline* ]] && [ ! -e "$DATA/claude-previous-statusline.json" ]; then
         printf '%s\n' "$current" > "$DATA/claude-previous-statusline.json"
         ok "previous statusLine kept for --uninstall"
@@ -205,11 +277,21 @@ claude_install() {
     backup_once "$CLAUDE_SETTINGS"
     jq --argjson d "$desired" '.statusLine = $d' "$CLAUDE_SETTINGS" | write_file "$CLAUDE_SETTINGS" 600 || true
     ok "statusLine in $CLAUDE_SETTINGS (refreshInterval 1 s)"
+    # automodel's own status line: agentline takes over and shows its routing
+    # (the model and effort it chose, and the route part) by asking automodel.
+    if is_am_statusline "$current_cmd"; then
+        note "the status line was automodel's: agentline now shows automodel's routing itself"
+        if grep -qx 'AGENTLINE_AUTOMODEL=\(off\|0\)' "$CONF" 2>/dev/null; then
+            note "AGENTLINE_AUTOMODEL=off hides it: agentline install --automodel auto"
+        elif am_find && ! am_has_json; then
+            note "this automodel release has no \`statusline --json\`: update it (automodel update) to see its routing here"
+        fi
+    fi
 }
 
 claude_uninstall() {
     say "Claude Code"
-    local current prev="$DATA/claude-previous-statusline.json"
+    local current restored="" prev="$DATA/claude-previous-statusline.json"
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null; then
         current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
         if [[ $current == *agentline* ]]; then
@@ -219,6 +301,25 @@ claude_uninstall() {
             else
                 jq 'del(.statusLine)' "$CLAUDE_SETTINGS" | write_file "$CLAUDE_SETTINGS" 600 || true
                 ok "statusLine removed"
+            fi
+            # automodel still installed: its own status line shows its routing
+            # again. A status line of yours can run behind it, as its chained command.
+            restored=$(jq -r '.statusLine.command? // empty' "$CLAUDE_SETTINGS" 2>/dev/null) || restored=""
+            if ! am_find; then
+                # automodel's status line, but automodel was uninstalled since.
+                if is_am_statusline "$restored"; then
+                    jq 'del(.statusLine)' "$CLAUDE_SETTINGS" | write_file "$CLAUDE_SETTINGS" 600 || true
+                    ok "statusLine removed: the previous one was automodel's, which is no longer installed"
+                fi
+            elif ! is_am_statusline "$restored"; then
+                jq --arg c "$AM_CMD statusline" '.statusLine = {type: "command", command: $c}' "$CLAUDE_SETTINGS" \
+                    | write_file "$CLAUDE_SETTINGS" 600 || true
+                ok "statusLine → automodel's ($AM_CMD statusline): it shows its routing again"
+                if [ -n "$restored" ]; then
+                    note "your status line ($restored) gave way to automodel's; to show it before automodel's segment, add"
+                    note "  statusline_command = $(jq -n --arg c "$restored" '$c')"
+                    note "at the top of ${AM_CFG:-the automodel config.toml}"
+                fi
             fi
         else same "statusLine (not agentline's)"; fi
     fi
@@ -234,7 +335,7 @@ codex_render() { # codex_render install|uninstall < config.toml > config.toml
     local list=""
     if grep -qx 'AGENTLINE_CODEX_MIRROR=1' "$CONF" 2>/dev/null; then
         list=$(mirror_items "$(sed -n 's/^AGENTLINE_SEGMENTS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF")")
-        [ -n "$list" ] || grep -q '^AGENTLINE_SEGMENTS=' "$CONF" || list=$(mirror_items "dir git session meta model effort ctx 5h 7d cache cost lines")
+        [ -n "$list" ] || grep -q '^AGENTLINE_SEGMENTS=' "$CONF" || list=$(mirror_items "$ALL_SEGMENTS")
     fi
     [ -n "$list" ] || list=$(sed -n 's/^AGENTLINE_CODEX_ITEMS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF" 2>/dev/null)
     [ -n "$list" ] || list=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
@@ -314,7 +415,7 @@ sources_install() {
     mkdir -p "$DATA"
     if [ "$SRC" != "$DATA/current" ]; then
         rm -rf "$new"; mkdir -p "$new"
-        for f in install.sh VERSION README.md LICENSE claude codex lib bin; do
+        for f in install.sh VERSION README.md CHANGELOG.md LICENSE claude codex lib bin; do
             [ -e "$SRC/$f" ] && cp -R "$SRC/$f" "$new/"
         done
         if [ -d "$DATA/current" ] && diff -rq "$new" "$DATA/current" >/dev/null 2>&1; then
@@ -331,8 +432,28 @@ sources_install() {
     case ":$PATH:" in *":$BIN_DIR:"*) ;; *) ((quiet)) || note "$BIN_DIR is not in your PATH: add it to use the agentline command" ;; esac
 }
 
+# conf_set <KEY> <value>: set AGENTLINE_KEY in the config, in place, quoted
+# when needed (values never hold " \ $ `). Returns 1 when it already is.
+conf_set() {
+    local line="AGENTLINE_$1=$2" tmp
+    [[ $2 =~ ^[A-Za-z0-9_.,:/+%@=-]+$ ]] || line="AGENTLINE_$1=\"$2\""
+    grep -qxF -- "$line" "$CONF" && return 1
+    tmp=$(mktemp "$CONF.XXXXXX")
+    if grep -q "^AGENTLINE_$1=" "$CONF"; then
+        K="AGENTLINE_$1=" L=$line awk 'index($0, ENVIRON["K"]) == 1 { if (!done) print ENVIRON["L"]; done = 1; next } { print }' "$CONF" > "$tmp"
+    else cat "$CONF" > "$tmp"; printf '%s\n' "$line" >> "$tmp"; fi
+    cat "$tmp" > "$CONF"; rm -f "$tmp"
+}
+conf_get() { # conf_get <KEY> → REPLY, unquoted; returns 1 when not set
+    local line
+    line=$(grep "^AGENTLINE_$1=" "$CONF" | tail -n 1) || return 1
+    REPLY=${line#*=}
+    case $REPLY in \"*\"|\'*\') REPLY=${REPLY:1:${#REPLY}-2} ;; esac
+}
+
 config_apply() {
     mkdir -p "$CONF_DIR"
+    local changed=0 k
     if [ ! -f "$CONF" ]; then
         local glyphs=unicode bar=smooth
         have_nerd_font && glyphs=nerd bar=capsule
@@ -340,6 +461,7 @@ config_apply() {
 # agentline configuration: shell syntax, read on every render.
 # Change it with \`agentline configure\`, or edit it (values: \`agentline --help\`).
 # Environment variables with the same names override this file.
+AGENTLINE_CONFIG_VERSION=2
 AGENTLINE_GLYPHS=$glyphs
 AGENTLINE_BAR=$bar
 AGENTLINE_BRANCH_ICON=auto
@@ -348,16 +470,17 @@ AGENTLINE_CODEX_MIRROR=1
 AGENTLINE_AUTO_UPDATE=1
 EOF
         ok "config → $CONF"
-    fi
-    local k line changed=0
-    for k in "${!SET[@]}"; do
-        line="AGENTLINE_$k=${SET[$k]}"
-        [[ ${SET[$k]} == *" "* || -z ${SET[$k]} ]] && line="AGENTLINE_$k=\"${SET[$k]}\""
-        grep -qx "$line" "$CONF" && continue
-        if grep -q "^AGENTLINE_$k=" "$CONF"; then sed -i.bak "s|^AGENTLINE_$k=.*|$line|" "$CONF" && rm -f "$CONF.bak"
-        else echo "$line" >> "$CONF"; fi
+    elif ! grep -qx 'AGENTLINE_CONFIG_VERSION=2' "$CONF"; then
+        # Version 2 (agentline 0.5.0) adds the route part: a saved list of
+        # parts gets it next to the effort, like the default list.
+        if conf_get SEGMENTS; then
+            with_route "$REPLY"
+            conf_set SEGMENTS "$REPLY" && ok "config: route (automodel) added to AGENTLINE_SEGMENTS"
+        fi
+        conf_set CONFIG_VERSION 2 || true
         changed=1
-    done
+    fi
+    for k in "${!SET[@]}"; do conf_set "$k" "${SET[$k]}" && changed=1; done
     if ((changed)); then ok "config: $(grep -h '^AGENTLINE_' "$CONF" | tr '\n' ' ')"
     else same "config ($(grep -h '^AGENTLINE_' "$CONF" | tr '\n' ' '))"; fi
 }
