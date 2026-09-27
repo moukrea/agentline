@@ -1,0 +1,8 @@
+# Release tarballs (codeload, which the installer and updates download) leave
+# out what an install never uses: the 2 MB demo, the tools, the tests and CI.
+/docs/demo.gif export-ignore
+/tools export-ignore
+/tests export-ignore
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
