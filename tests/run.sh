@@ -187,6 +187,11 @@ for junk in 'not json' '{"v":2,"routed":true}' '[1,2]' '{"v":1,"routed":true,"la
     CHECK_NAME="garbage answer ($junk): not routed, no error"
     check test -z "$(cat "$TMP/err")" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
 done
+out=$(env AGENTLINE_CONFIG=/dev/null COLUMNS=200 \
+    AGENTLINE_AUTOMODEL_JSON='{"v":1,"routed":true,"alias":"jev","label":"X","effort":"high","state":"routed","confidence":1e300}' \
+    bash "$ROOT/claude/statusline.sh" <<<"$jev" 2>"$TMP/err" | head -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="routed: a confidence out of range is clamped, no error"
+check test ! -s "$TMP/err" -a "$(grep -c 'jev → X ●●●○○ high  1.00$' <<<"$out")" -eq 1
 
 # A fake automodel, found through the UserPromptSubmit hook of a throwaway
 # settings.json; it records its arguments. kind: new, old (no --json), hang.
