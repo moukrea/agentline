@@ -53,6 +53,14 @@ All notable changes to agentline. Versions follow [Semantic Versioning](https://
   and CI.
 - Config values holding `|` (such as layouts) are written and replaced safely;
   values that would break the shell-syntax config file are refused.
+- `curl | bash` run from a directory holding a `claude/statusline.sh` (dotfiles)
+  installed that script instead of downloading the release.
+- Automatic updates never ran on macOS, which has no `setsid`.
+- Unicode pie gauges (the default compact gauge without a Nerd Font) were blank
+  past 25 %.
+- A directory whose path is too long for a cache file name no longer writes
+  errors at each render.
+- The setup assistant keeps the terminal usable whatever ends it.
 
 ## 0.4.2 - 2026-09-25
 
