@@ -36,8 +36,21 @@ All notable changes to agentline. Versions follow [Semantic Versioning](https://
 
 ### Fixed
 
-- Rendering took seconds on bash 5.3 (an extglob pattern in the width
-  measurement): back to a few tens of milliseconds, same output.
+- Renders were very slow on bash 5.3 (an extglob pattern in the width
+  measurement): now about 40 ms, same output.
+- Updates never install the unreleased `main` branch: the latest release is found
+  from where `github.com/…/releases/latest` redirects (no API rate limit), then
+  from the API, and an update that finds no release fails instead. An update
+  already on the latest release downloads nothing.
+- bash 5 is found on macOS, whose own bash is 3.2: the installer runs itself with
+  Homebrew's (or another bash 5), and the Claude Code status line runs it by its
+  absolute path instead of the first `bash` in Claude Code's `PATH`; existing
+  installs switch on their next install or update. `agentline` no longer needs
+  `readlink -f`.
+- The cache directory is hardened: private, and used only when it is really
+  yours (owner-checked).
+- Smaller downloads: release tarballs leave out the 2 MB demo, the tools, tests
+  and CI.
 - Config values holding `|` (such as layouts) are written and replaced safely;
   values that would break the shell-syntax config file are refused.
 

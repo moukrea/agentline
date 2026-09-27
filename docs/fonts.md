@@ -42,6 +42,6 @@ Then set JuliaMono as the terminal font, with Symbols Nerd Font Mono as fallback
 
 ## Checking
 
-Run `agentline configure`: the glyph line at the top of the Look section shows
-Nerd icons. If you see icons rather than empty boxes or question marks, your
-terminal font draws them.
+Run `agentline configure` with Glyphs set to Nerd Font icons: the preview at the
+top draws the branch and reset-time icons and the capsule bars. If you see icons
+rather than empty boxes or question marks, your terminal font draws them.

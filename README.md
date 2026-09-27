@@ -8,9 +8,15 @@ also shows how [automodel](#automodel) routes each prompt when you use it.
 ![agentline: bars, effort gauge, responsive layout, glyphs, live states and ultracode effects](docs/demo.gif)
 
 ```
-~/…/Personal/agentline  ⎇ feat/installer +2 !1 ?3  “Refactor the billing module”          ◇ Concise  Opus 5.5 ▁▂▄▆█ medium
-context ██▋       26%  5h ██▋       27% ↻3h29  7d ████▍     44% ↻3d18h           cache 🔥 51m  $10.28 in 3h12  edits +663 −41
+~/projects/billing  ⎇ feat/billing-export ↑1 +2 !1 ?3 $1  “Refactor the billing module”       ◇ Concise  Opus 5.5 ●●○○○ medium
+context ██▋        26%  5h ██▋        27% ↻3h30  7d ████▍      44% ↻3d19h         cache 🔥 52m  $10.28 in 3h12  edits +663 −41
 ```
+
+This is the real renderer's output for the sample session (`lib/sample.json`) in
+a 130-column terminal, with `unicode` glyphs (hence `smooth` bars and the `⎇` `↻`
+icons) and every other setting at its default (`two` lines, `dots` effort gauge).
+Plain text loses the colours and the bar tracks; with a Nerd Font you get icons
+and capsule bars, as in the demo.
 
 - **Line 1**: where you are (directory, git branch and status, session name) on the
   left; who answers (output style, model, reasoning effort, automodel's routing) on
@@ -26,7 +32,7 @@ context ██▋       26%  5h ██▋       27% ↻3h29  7d ████▍ 
 | Directory | In Claude Code's own accent colour. |
 | Git | Branch, ahead/behind, then staged, modified, untracked, conflicts, stash (see [Glyphs](#glyphs)). Worktrees get their own icon. Cached 2 s per directory. |
 | Model | Claude Code's model, or, when [automodel](#automodel) routes the session, the model it picked: `jev → Opus 5.5`. |
-| Effort | 5-step gauge coloured from `low` to `max` (the effort automodel picked, when it routes). **Ultracode** gets its own effect: Claude Code's violet with a sweeping highlight, a drifting rainbow, or plain violet. |
+| Effort | 5-step gauge coloured from `low` to `max`, dots `●●○○○` by default (the effort automodel picked, when it routes). **Ultracode** gets its own effect: by default Claude Code's violet with a sweeping highlight; else a drifting rainbow, or plain violet. |
 | Route | Only when automodel routes the session: how it decided. The confidence `0.86` (green, yellow, red), or `default`, `pinned`, `⚠ fallback`; `⚠ jev: <why>` when its router could not be asked; `↻ switched` for a moment after it changes its mind. See [the route part](#the-route-part). |
 | Context | Gradient bar and percentage; the percentage pulses above 85 %. |
 | 5h / 7d | Usage bar and percentage. `⚠ 1h20` in red when the current pace reaches the limit before it resets; otherwise the time until reset. |
@@ -50,11 +56,14 @@ animations) is cheap. automodel, when present, is asked while the rest renders.
 
 ## Install
 
-Requirements: bash 5, `jq`, `git`, `curl`. Linux or macOS.
+Needs bash 5, `jq`, `git` and `curl`, on Linux or macOS (there: `brew install bash
+jq`); see [Requirements](#requirements-and-compatibility).
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash
 ```
+
+This installs the latest release, never unreleased code from `main`.
 
 The first install opens a full-screen setup assistant. At the top, a live preview:
 the real status line, drawn from your last Claude Code session (a sample one on a
@@ -96,6 +105,29 @@ differs. It backs up each file it edits once (`settings.json.agentline-backup`,
 `config.toml.agentline-backup`) and keeps any status line you had configured, so
 uninstalling puts it back.
 
+### Pin a version, or read it first
+
+A given release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/v0.5.0/install.sh \
+  | AGENTLINE_REF=v0.5.0 bash
+```
+
+Turn automatic updates off (in the assistant, or `agentline install --auto-update
+off`) to stay on it. `AGENTLINE_REF` works for `agentline update --force` too, to
+go back to a release.
+
+To read the code before running it, clone the release and run its installer: it
+installs that copy and downloads nothing.
+
+```sh
+git clone --depth 1 --branch v0.5.0 https://github.com/moukrea/agentline
+cd agentline
+less install.sh claude/statusline.sh   # the installer, and what Claude Code runs
+./install.sh
+```
+
 ### The `agentline` command
 
 Installed in `~/.local/bin`:
@@ -113,9 +145,30 @@ agentline version
 
 With automatic updates on (the assistant's default), the status line checks for a
 new release at most once a day, in the background: rendering never waits for it.
-Your configuration is kept across updates. Turn it off with
-`agentline install --auto-update off`, or update by hand with `agentline update`.
-See [CHANGELOG.md](CHANGELOG.md) for what changed.
+Updates only ever install a published release, and download nothing when you
+already have the latest one. Your configuration is kept across updates. Turn them
+off with `agentline install --auto-update off`, or update by hand with
+`agentline update`. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+
+## Requirements and compatibility
+
+- **Linux or macOS**, with **bash 5**, `jq`, `git` and `curl` (and `ps`, `stty`
+  for the terminal's width). macOS ships bash 3.2: `brew install bash jq`. The
+  installer runs itself with the first bash 5 it finds (Homebrew, Linuxbrew,
+  MacPorts, then your `PATH`) and writes that bash's absolute path in Claude
+  Code's `statusLine`, so an older bash first in Claude Code's `PATH` is never
+  used. Python 3.11, when present, checks that an edited Codex `config.toml` still
+  parses.
+- **Claude Code**: agentline reads these fields of the JSON Claude Code sends to
+  status lines: `cwd` and `workspace` (directory, project, worktree), `model`,
+  `effort.level`, `session_id`, `session_name`, `transcript_path`, `output_style`,
+  `agent`, `vim.mode`, `fast_mode`, `context_window`, `cost`, `rate_limits` and
+  `prompt_cache`. A field your Claude Code version or plan does not send just
+  hides its part.
+- **Codex**: Codex draws its own line from `tui.status_line` in
+  `~/.codex/config.toml`; agentline only picks the items (see [Codex](#codex)).
+- `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are
+  honoured. The `agentline` command goes to `~/.local/bin` (`AGENTLINE_BIN_DIR`).
 
 ## Fonts
 
@@ -159,7 +212,7 @@ The three gauges (bars, compact gauges, effort) share one catalogue of styles:
 | `AGENTLINE_AUTO_UPDATE` | `1`, `0` | `1` |
 
 `auto` icons follow `AGENTLINE_GLYPHS`: octicons with `nerd`, Unicode otherwise.
-The preview above uses `unicode` glyphs and `smooth` bars. `capsule` needs Nerd glyphs; with `unicode` it falls back to `smooth`.
+`capsule` needs Nerd glyphs; with `unicode` it falls back to `smooth`.
 `AGENTLINE_CONFIG_VERSION` is the installer's own bookkeeping: leave it as is.
 
 ### Layouts
@@ -210,7 +263,7 @@ knows the session runs on "Jev (auto)" and reports its own effort, so a plain
 status line shows the wrong model and effort. agentline asks automodel instead:
 
 ```
-~/…/billing  ⎇ main ✓                                      jev → Opus 5.5 ●●●●○ xhigh  0.86 ↻ switched
+~/projects/billing  ⎇ main ✓                                   jev → Opus 5.5 ●●●●○ xhigh  0.86 ↻ switched
 ```
 
 - The **model** part shows `jev → Opus 5.5`: automodel's alias, then the model it
@@ -304,24 +357,76 @@ the `ultra_effort_enter` / `ultra_effort_exit` entry in the session transcript, 
 bytes added since the previous render. In a session automodel routes, its answer
 says when it chose ultracode.
 
+## Privacy and network
+
+agentline sends nothing about you or your sessions anywhere: no telemetry. On each
+render it reads, locally:
+
+- the JSON Claude Code pipes to it (model, session, cost, limits…);
+- the session transcript, only to detect ultracode, and only the bytes added since
+  the previous render; the `ultracode` key of Claude Code's `settings.json` files;
+- the `git status` of the session's directory, and the terminal's size;
+- its config, and, when automodel routes the session, the answer of
+  `automodel statusline --json`: a local process (what automodel itself does over
+  the network is up to automodel).
+
+It caches git state, the terminal and the last session (for the setup assistant's
+preview) in a private directory of yours: `$XDG_RUNTIME_DIR/agentline-<uid>`, else
+under `$TMPDIR` or `/tmp`.
+
+The only network access is installing and updating. With automatic updates on, at
+most once a day the status line asks github.com for the latest release's tag (the
+API at api.github.com if that fails) and, only when there is a new one, downloads
+it from codeload.github.com. `agentline update` and the installer do the same;
+`agentline install --auto-update off` stops the daily check.
+
+## Troubleshooting
+
+- **Nothing shows up.** Run the command Claude Code runs, with an empty session:
+  `eval "$(jq -r .statusLine.command ~/.claude/settings.json)" <<< '{}'` prints a
+  short line, or an error naming what is missing. `jq` and `git` must be in the
+  `PATH` Claude Code starts with (started from an app or IDE on macOS, it may lack
+  Homebrew's `/opt/homebrew/bin`). With `CLAUDE_CONFIG_DIR` set, run the installer
+  with the same value. Then restart Claude Code.
+- **Wrong width.** The line fits the terminal Claude Code runs in, found through
+  its controlling terminal (`ps`, then `stty size`), minus Claude Code's padding.
+  `COLUMNS` in Claude Code's environment wins; without it and without a terminal
+  (some IDE panes), 120 columns are assumed.
+- **Boxes or question marks instead of icons.** Your terminal font has no Nerd
+  icons: install one ([docs/fonts.md](docs/fonts.md)), or switch to
+  `agentline install --glyphs unicode`. `🔥 ⏳ 🧊` come from your emoji font.
+- **Slow render.** Time it in the project:
+  `time (eval "$(jq -r .statusLine.command ~/.claude/settings.json)" <<< '{}')`
+  takes a few tens of milliseconds once its caches are warm (run it twice). A huge
+  repository slows `git status` (run at most every 2 s per directory: leave `git`
+  out of `--segments`); a slow automodel is waited for 0.8 s at most
+  (`--automodel off`). Releases before 0.5.0 were slow on bash 5.3:
+  `agentline update`.
+
 ## Development
 
 ```sh
 tests/run.sh    # renders every fixture × glyph set × bar style at 17 widths, the
                 # layouts, the light theme and automodel's answers (with a fake
-                # automodel); installs, reinstalls, migrates, updates and uninstalls
-                # in a throwaway HOME, including a simulated `curl | bash` with
-                # scripted assistant answers and install over automodel's status line
+                # automodel); installs, reinstalls, migrates, updates (from a fake
+                # GitHub) and uninstalls in a throwaway HOME, including a simulated
+                # `curl | bash` with scripted assistant answers and install over
+                # automodel's status line
 ```
 
 CI runs ShellCheck (`install.sh`, `claude/statusline.sh`, `lib/wizard.sh`,
-`bin/agentline`, `tests/run.sh`) and the suite on every push.
+`bin/agentline`, `tests/run.sh`) and the suite on pushes to `main`, on tags and on
+pull requests.
 
 `docs/demo.gif` is recorded from the real renderer with a pinned clock and sample
-session: `tools/record-demo.py [--fonts DIR]` (JuliaMono and Symbols Nerd Font Mono
-files in DIR, `~/.local/share/fonts` by default; needs Pillow, ffmpeg, jq, Noto Sans
-and the bitmap build of Noto Color Emoji). It never runs automodel: the routed
-scenes pass their answers in `AGENTLINE_AUTOMODEL_JSON`.
+session: `tools/record-demo.py [--fonts DIR] [--emoji-font FILE]` (JuliaMono and
+Symbols Nerd Font Mono files in DIR, `~/.local/share/fonts` by default; needs
+Pillow, ffmpeg, jq and Noto Sans). Emoji need the CBDT (bitmap) build of Noto Color
+Emoji, which Pillow can draw, unlike the COLRv1 build many systems ship: get
+`NotoColorEmoji.ttf` from a [noto-emoji release](https://github.com/googlefonts/noto-emoji/releases)
+and pass it with `--emoji-font`. It never runs automodel: the routed scenes pass
+their answers in `AGENTLINE_AUTOMODEL_JSON`. Release tarballs leave out the demo,
+`tools/`, `tests/` and `.github/` (`.gitattributes`).
 
 ## License
 
