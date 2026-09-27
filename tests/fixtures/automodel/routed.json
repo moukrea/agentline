@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "routed": true,
+  "alias": "jev",
+  "model": "opus-5.5",
+  "label": "Opus 5.5",
+  "effort": "xhigh",
+  "mode": "",
+  "state": "routed",
+  "confidence": 0.86,
+  "pin": "",
+  "issue": "",
+  "flash": "switched",
+  "text": "jev → opus-5.5·xhigh 0.86 ↻ switched"
+}

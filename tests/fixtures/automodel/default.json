@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "routed": true,
+  "alias": "jev",
+  "model": "haiku-5",
+  "label": "",
+  "effort": "low",
+  "mode": "",
+  "state": "default",
+  "confidence": 0,
+  "pin": "",
+  "issue": "OpenRouter key rejected by the upstream provider",
+  "flash": "",
+  "text": "jev → haiku-5·low (default) ⚠ jev: OpenRouter key rejected by the upstream provider"
+}

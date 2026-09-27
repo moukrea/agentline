@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "routed": true,
+  "alias": "jev",
+  "model": "sonnet-5",
+  "label": "Sonnet 5",
+  "effort": "high",
+  "mode": "",
+  "state": "pinned",
+  "confidence": 0,
+  "pin": "high",
+  "issue": "no OpenRouter key",
+  "flash": "",
+  "text": "jev → sonnet-5·high (pinned) ⚠ jev: no OpenRouter key"
+}

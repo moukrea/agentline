@@ -86,6 +86,147 @@ CHECK_NAME="no ultracode after leaving it"; check test "$(grep -c 'ultracode' <<
 plain=$(AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="medium effort shown without ultracode"; check grep -q 'medium' <<<"$plain"
 
+# Layouts and themes.
+for fx in "$ROOT"/tests/fixtures/*.json; do
+    payload=$(jq --arg cwd "$REPO" --argjson n "$now" '.cwd = $cwd | .workspace.current_dir = $cwd | .transcript_path = null
+        | (.prompt_cache.expires_at |= (if . then $n + . else . end)) | (.rate_limits[]?.resets_at |= $n + .)' "$fx")
+    for am in "" "$(jq -c . "$ROOT/tests/fixtures/automodel/routed.json")" "$(jq -c . "$ROOT/tests/fixtures/automodel/fallback.json")"; do
+        for cols in 80 90 100 120 140 160 200; do
+            out=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT=one AGENTLINE_AUTOMODEL_JSON=$am COLUMNS=$cols \
+                  bash "$ROOT/claude/statusline.sh" <<<"$payload" 2>"$TMP/err")
+            max=$(printf '%s\n' "$out" | width | sort -n | tail -1)
+            CHECK_NAME="layout one: $(basename "$fx") ${am:+routed }@$cols: one clean line that fits ($max)"
+            check test -z "$(cat "$TMP/err")" -a "$(printf '%s\n' "$out" | wc -l)" -eq 1 -a "$max" -le $((cols - 4))
+        done
+    done
+    for glyphs in unicode nerd; do
+        for cols in 60 100 160; do
+            out=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_THEME=light AGENTLINE_GLYPHS=$glyphs COLUMNS=$cols \
+                  bash "$ROOT/claude/statusline.sh" <<<"$payload" 2>"$TMP/err")
+            max=$(printf '%s\n' "$out" | width | sort -n | tail -1)
+            CHECK_NAME="theme light: $(basename "$fx") $glyphs @$cols: two clean lines that fit ($max)"
+            check test -z "$(cat "$TMP/err")" -a "$(printf '%s\n' "$out" | wc -l)" -eq 2 -a "$max" -le $((cols - 4))
+        done
+    done
+done
+light=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_THEME=light COLUMNS=160 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
+CHECK_NAME="theme light: dark text for the model"; check grep -q $'\e\\[38;2;40;40;50mOpus' <<<"$light"
+custom=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='model route | dir; ctx 5h bogus | cost; nothing here' COLUMNS=160 \
+    AGENTLINE_AUTOMODEL_JSON="$(jq -c . "$ROOT/tests/fixtures/automodel/routed.json")" \
+    bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" 2>"$TMP/err" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="layout custom: clean, lines without known parts skipped"
+check test -z "$(cat "$TMP/err")" -a "$(printf '%s\n' "$custom" | wc -l)" -eq 2
+CHECK_NAME="layout custom: parts where asked"
+check grep -q '^jev → Opus 5.5.* 0.86 .*/tmp$' <<<"$(head -1 <<<"$custom")"
+CHECK_NAME="layout custom: second line"; check grep -q '^context .*5h .*\$10.28 in' <<<"$(tail -1 <<<"$custom")"
+CHECK_NAME="layout custom: parts left out stay out"; check test "$(grep -c '7d\|cache\|edits\|Refactor' <<<"$custom")" -eq 0
+three=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='dir; model; ctx | cost' COLUMNS=100 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
+CHECK_NAME="layout custom: three lines"; check test "$(printf '%s\n' "$three" | wc -l)" -eq 3
+none=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='bogus | nothing' COLUMNS=100 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
+CHECK_NAME="layout custom: nothing known falls back to two lines"; check test "$(printf '%s\n' "$none" | wc -l)" -eq 2
+
+# ── automodel routing ──────────────────────────────────────────────────────
+echo "automodel"
+# A session on automodel's custom model, with each answer of `automodel statusline --json`.
+jev=$(jq --arg cwd "$REPO" --argjson n "$now" '.cwd = $cwd | .workspace.current_dir = $cwd | .model = {id: "jev", display_name: "Jev (auto)"}
+    | (.prompt_cache.expires_at |= (if . then $n + . else . end)) | (.rate_limits[]?.resets_at |= $n + .)' "$ROOT/tests/fixtures/session.json")
+for am in "$ROOT"/tests/fixtures/automodel/*.json; do
+    amj=$(jq -c . "$am")
+    for glyphs in unicode nerd; do
+        for bar in capsule line; do
+            for cols in 60 70 80 90 100 110 120 130 140 150 160 170 180 190 200; do
+                out=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON=$amj AGENTLINE_GLYPHS=$glyphs AGENTLINE_BAR=$bar COLUMNS=$cols \
+                      bash "$ROOT/claude/statusline.sh" <<<"$jev" 2>"$TMP/err")
+                max=$(printf '%s\n' "$out" | width | sort -n | tail -1)
+                CHECK_NAME="routed $(basename "$am") $glyphs/$bar @$cols: two clean lines that fit ($max)"
+                check test -z "$(cat "$TMP/err")" -a "$(printf '%s\n' "$out" | wc -l)" -eq 2 -a "$max" -le $((cols - 4))
+            done
+        done
+    done
+done
+routed() { # routed <answer> [env...] → the first line, plain text, at 200 columns
+    local a; a=$(jq -c . "$ROOT/tests/fixtures/automodel/$1.json"); shift
+    env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$a" COLUMNS=200 "$@" bash "$ROOT/claude/statusline.sh" <<<"$jev" \
+        | head -1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+out=$(routed routed)
+CHECK_NAME="routed: model and routed effort"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ↻ switched$' <<<"$out"
+CHECK_NAME="routed: Claude Code's model and effort replaced"; check test "$(grep -c 'Jev (auto)\|medium' <<<"$out")" -eq 0
+CHECK_NAME="routed: pinned, issue"; check grep -q 'jev → Sonnet 5 ●●●○○ high  pinned ⚠ jev: no OpenRouter key$' <<<"$(routed pinned)"
+CHECK_NAME="routed: fallback, flash"; check grep -q 'Opus 5.5 ●●○○○ medium  ⚠ fallback ⚠ jev: timeout ↻ cold$' <<<"$(routed fallback)"
+CHECK_NAME="routed: default, model key, issue truncated"; check grep -q 'jev → haiku-5 ●○○○○ low  default ⚠ jev: OpenRouter key rejected…$' <<<"$(routed default)"
+CHECK_NAME="routed: catalog error keeps Claude Code's model"; check grep -q 'Jev (auto) ●●○○○ medium  ⚠ catalog$' <<<"$(routed error)"
+CHECK_NAME="routed: ultracode from the mode"; check grep -q 'jev → Opus 5.5 ●●●●● ultracode  0.62 ↻ compact$' <<<"$(routed ultracode)"
+out=$(jq -c . "$ROOT/tests/fixtures/automodel/ultracode.json" | { read -r a; AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON=$a \
+    AGENTLINE_ULTRA_EFFECT=plain COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev"; })
+CHECK_NAME="routed: ultracode effect drawn"; check grep -q $'\e\\[1;38;2;175;135;255m●●●●● ultracode' <<<"$out"
+out=$(routed routed AGENTLINE_SEGMENTS="dir model effort ctx")
+CHECK_NAME="routed: route hidden when not in the segments"; check test "$(grep -c '0.86\|↻' <<<"$out")" -eq 0
+CHECK_NAME="routed: model still routed without the route"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh$' <<<"$out"
+out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON='{"v":1,"routed":false}' COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="not routed: Claude Code's model"; check grep -q 'Jev (auto) ●●○○○ medium$' <<<"$(head -1 <<<"$out")"
+for junk in 'not json' '{"v":2,"routed":true}' '[1,2]' '{"v":1,"routed":true,"label":"x'; do
+    out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$junk" COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" 2>"$TMP/err" | sed 's/\x1b\[[0-9;]*m//g')
+    CHECK_NAME="garbage answer ($junk): not routed, no error"
+    check test -z "$(cat "$TMP/err")" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
+done
+
+# A fake automodel, found through the UserPromptSubmit hook of a throwaway
+# settings.json; it records its arguments. kind: new, old (no --json), hang.
+fake_am() {
+    local d="$TMP/am-$1"; mkdir -p "$d/bin" "$d/claude"
+    { printf '#!/usr/bin/env bash\nkind=%q log=%q answer=%q\n' "$1" "$d/argv" "$(jq -c . "$ROOT/tests/fixtures/automodel/routed.json")"
+      cat <<'EOF'
+echo "$*" >> "$log"
+case " $* " in
+    *" help "*)
+        echo "  automodel statusline                 render the statusline segment"
+        [ "$kind" = old ] || echo "  automodel statusline --json          the routing state, as JSON" ;;
+    *" statusline --json "*) cat > /dev/null; [ "$kind" = hang ] && { echo $$ > "$log.pid"; exec sleep 30; }; echo "$answer" ;;
+    *" statusline "*) cat > /dev/null; echo "jev → opus-5.5·xhigh 0.86" ;;
+esac
+EOF
+    } > "$d/bin/automodel"; chmod +x "$d/bin/automodel"
+    jq -n --arg c "$d/bin/automodel --config $d/config.toml hook decide" \
+        '{hooks: {SessionStart: [{hooks: [{type: "command", command: "echo"}]}], UserPromptSubmit: [{hooks: [{type: "command", command: $c}]}]}}' \
+        > "$d/claude/settings.json"
+}
+am_render() { # am_render <kind> [env...] → the first line, plain text
+    local k=$1; shift
+    env CLAUDE_CONFIG_DIR="$TMP/am-$k/claude" AGENTLINE_CONFIG=/dev/null COLUMNS=200 "$@" bash "$ROOT/claude/statusline.sh" <<<"$jev" 2>"$TMP/err" \
+        | head -1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+fake_am new; fake_am old; fake_am hang
+out=$(am_render new)
+CHECK_NAME="automodel: called with statusline --json"; check grep -qx -- "--config $TMP/am-new/config.toml statusline --json" "$TMP/am-new/argv"
+CHECK_NAME="automodel: its answer is shown"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ↻ switched$' <<<"$out"
+CHECK_NAME="automodel: no stderr"; check test ! -s "$TMP/err"
+am_render new > /dev/null
+CHECK_NAME="automodel: probed once, then cached"; check test "$(grep -cx help "$TMP/am-new/argv")" -eq 1
+touch "$TMP/am-new/claude/settings.json"; am_render new > /dev/null
+CHECK_NAME="automodel: probed again after settings.json changes"; check test "$(grep -cx help "$TMP/am-new/argv")" -eq 2
+: > "$TMP/am-new/argv"
+out=$(am_render new AUTOMODEL_CHAINED=1)
+CHECK_NAME="automodel: not called when it chains agentline"; check test ! -s "$TMP/am-new/argv"
+CHECK_NAME="automodel: chained, not routed"; check grep -q 'Jev (auto) ●●○○○ medium$' <<<"$out"
+out=$(am_render new AGENTLINE_AUTOMODEL=off)
+CHECK_NAME="automodel: not called when off"; check test ! -s "$TMP/am-new/argv"
+out=$(am_render old)
+CHECK_NAME="automodel: an old release is probed"; check grep -qx help "$TMP/am-old/argv"
+CHECK_NAME="automodel: an old release is never called for its status line"; check test "$(grep -c statusline "$TMP/am-old/argv")" -eq 0
+CHECK_NAME="automodel: an old release, not routed"; check grep -q 'Jev (auto) ●●○○○ medium$' <<<"$out"
+t0=${EPOCHREALTIME//[.,]/}; out=$(am_render hang); t1=${EPOCHREALTIME//[.,]/}
+CHECK_NAME="automodel: a hanging call gives up ($(((t1 - t0) / 1000)) ms)"; check test $((t1 - t0)) -lt 2000000
+CHECK_NAME="automodel: hanging, not routed, no stderr"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
+sleep 0.2
+stopped() { local p; p=$(cat "$1" 2>/dev/null) && [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; }
+CHECK_NAME="automodel: the hanging call is stopped"; check stopped "$TMP/am-hang/argv.pid"
+mkdir -p "$TMP/am-none/claude"; echo '{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "other hook decide"}]}]}}' > "$TMP/am-none/claude/settings.json"
+out=$(am_render none)
+CHECK_NAME="automodel: absent from settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
+out=$(am_render missing)
+CHECK_NAME="automodel: no settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
+
 # ── Claude Code ────────────────────────────────────────────────────────────
 echo "claude code"
 mkdir -p "$HOME/.claude"

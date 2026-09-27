@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "routed": true,
+  "alias": "jev",
+  "model": "opus-5.5",
+  "label": "Opus 5.5",
+  "effort": "xhigh",
+  "mode": "ultracode",
+  "state": "routed",
+  "confidence": 0.62,
+  "pin": "",
+  "issue": "",
+  "flash": "compact",
+  "text": "jev → opus-5.5·xhigh +ultracode 0.62 ↻ compact"
+}

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # agentline — Claude Code status line.
 #
-# Two aligned lines: where/what (dir, git, session) … who (style, model, effort)
-# then budgets (context, 5h, 7d) … session stats (prompt cache, cost, edits).
+# Two aligned lines by default (AGENTLINE_LAYOUT): where/what (dir, git,
+# session) … who (style, model, effort, automodel route) then budgets
+# (context, 5h, 7d) … session stats (prompt cache, cost, edits).
 # Reads the JSON Claude Code pipes on stdin. Single jq pass, git status cached
 # 2 s per directory, tty lookup cached per session: ~40 ms per render, so a
-# 1-second refreshInterval is cheap.
+# 1-second refreshInterval is cheap. With automodel routing the session, its
+# answer is fetched while the rest renders.
 #
 # Configuration: ${XDG_CONFIG_HOME:-~/.config}/agentline/config (shell syntax),
 # overridable by the same AGENTLINE_* variables in the environment.
@@ -25,7 +27,8 @@ CACHE_DIR="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID"
 # ── Configuration ─────────────────────────────────────────────────────────
 # Environment wins over the config file, which wins over the defaults.
 declare -A ENV_OVERRIDE
-for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP AUTO_UPDATE SEGMENTS EFFORT_STYLE COMPACT_STYLE ULTRA_EFFECT; do
+for k in GLYPHS BAR BRANCH_ICON RESET_ICON PATH_COLOR ICON_GAP AUTO_UPDATE SEGMENTS EFFORT_STYLE COMPACT_STYLE ULTRA_EFFECT \
+         THEME LAYOUT AUTOMODEL; do
     v="AGENTLINE_$k"; [ -n "${!v+x}" ] && ENV_OVERRIDE[$k]=${!v}
 done
 CONFIG_FILE="${AGENTLINE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/agentline/config}"
@@ -40,7 +43,7 @@ BRANCH_ICON=${AGENTLINE_BRANCH_ICON:-auto}     # auto | unicode | octicon | powe
 RESET_ICON=${AGENTLINE_RESET_ICON:-auto}       # auto | unicode | octicon | mdi-history | mdi-progress-clock | mdi-refresh
 PATH_COLOR=${AGENTLINE_PATH_COLOR:-215;119;87} # Claude Code's spinner colour
 ICON_GAP=${AGENTLINE_ICON_GAP:-auto}           # auto | 0 | 1: space after Nerd icons
-SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort ctx 5h 7d cache cost lines}
+SEGMENTS=${AGENTLINE_SEGMENTS:-dir git session meta model effort route ctx 5h 7d cache cost lines}
 EFFORT_STYLE=${AGENTLINE_EFFORT_STYLE:-dots}   # effort gauge; auto = the bar style
 COMPACT_STYLE=${AGENTLINE_COMPACT_STYLE:-pie}  # gauges on narrow terminals
 # Older names: minibar = the bar style, 5 cells wide; text / percent = none.
@@ -50,7 +53,88 @@ for v in BAR_STYLE COMPACT_STYLE EFFORT_STYLE; do
     case ${!v} in text|percent) printf -v "$v" none ;; esac
 done
 ULTRA_EFFECT=${AGENTLINE_ULTRA_EFFECT:-violet} # violet | rainbow | plain
+THEME=${AGENTLINE_THEME:-dark}                 # dark | light: the terminal's background
+LAYOUT=${AGENTLINE_LAYOUT:-two}                # two | one | "left | right; left | right"
+AUTOMODEL=${AGENTLINE_AUTOMODEL:-auto}         # auto | off: show automodel's routing
 declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
+
+# ── automodel (routes each prompt of a "Jev" session to a model and effort) ─
+# `automodel statusline --json` says what the current session was routed to.
+# automodel is found through the UserPromptSubmit hook it installs in
+# settings.json ("<exe> --config <cfg> hook decide"), together with a probe of
+# `automodel help`: releases without --json would run their chained status line
+# (maybe agentline itself). Both are cached until settings.json or the binary
+# changes: without automodel, a render costs a few file tests and no process.
+# The call runs while the rest renders; its answer is read at the last moment,
+# and anything but a valid answer within 0.8 s means "not routed".
+#   AGENTLINE_AUTOMODEL=off: never ask.
+#   AGENTLINE_AUTOMODEL_JSON: an answer to use instead (previews, tests);
+#     '{"v":1,"routed":false}' shows the session as not routed.
+#   AUTOMODEL_CHAINED=1: automodel runs agentline and prints its own segment.
+am_fd="" am_pid="" am_routed=0
+AM_JQ='def s: (. // "" | tostring | explode | map(select(. >= 32 and . != 127)) | implode);   # no control characters
+  if type == "object" and .v == 1 and .routed == true then
+    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then . * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_routed=1"
+  else "am_routed=0" end'
+am_discover() { # find automodel in settings.json and probe it → cache
+    local cmd="" line fd pid rc=0 v val
+    am_exe="" am_cfg="" am_ok=0
+    [ -r "$am_settings" ] && cmd=$(jq -r 'first((.hooks.UserPromptSubmit? // [])[]?.hooks[]?.command? | strings
+        | select(contains("automodel") and endswith(" hook decide"))) // empty' "$am_settings" 2>/dev/null)
+    cmd=${cmd% hook decide}
+    if [ -n "$cmd" ]; then
+        case $cmd in *" --config "*) am_exe=${cmd%% --config *} am_cfg=${cmd#* --config } ;; *) am_exe=$cmd ;; esac
+        for v in am_exe am_cfg; do   # as a shell would read them: quotes, ~/
+            val=${!v}
+            case $val in \"*\"|\'*\') val=${val:1:${#val}-2} ;; esac
+            case $val in \~/*) val=$HOME/${val#\~/} ;; esac
+            printf -v "$v" '%s' "$val"
+        done
+        [[ $am_exe == */* ]] || am_exe=$(type -P "$am_exe")
+    fi
+    if [ -n "$am_exe" ] && [ -x "$am_exe" ]; then
+        exec {fd}< <(exec "$am_exe" help </dev/null 2>/dev/null)
+        pid=$!
+        while :; do
+            line=""; IFS= read -r -t 1 -u "$fd" line; rc=$?
+            [[ $line == *statusline*--json* ]] && { am_ok=1; break; }
+            ((rc == 0)) || break
+        done
+        ((rc > 128)) && kill "$pid" 2>/dev/null
+        exec {fd}<&-
+    fi
+    { printf 'am_exe=%q am_cfg=%q am_ok=%d\n' "$am_exe" "$am_cfg" "$am_ok" > "$am_cache.$$" \
+        && mv -f "$am_cache.$$" "$am_cache"; } 2>/dev/null
+}
+case $AUTOMODEL in
+    off|0) ;;
+    *)
+        if [ -n "${AGENTLINE_AUTOMODEL_JSON:-}" ]; then
+            exec {am_fd}< <(jq -r "$AM_JQ" <<<"$AGENTLINE_AUTOMODEL_JSON" 2>/dev/null)
+        elif [ "${AUTOMODEL_CHAINED:-}" != 1 ]; then
+            am_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+            am_cache="$CACHE_DIR/automodel-${am_settings//\//%}"
+            am_exe="" am_cfg="" am_ok=0
+            # shellcheck source=/dev/null
+            if [ -r "$am_cache" ]; then . "$am_cache"; fi
+            if [ ! -e "$am_cache" ] || [ "$am_settings" -nt "$am_cache" ] || [ "$am_exe" -nt "$am_cache" ]; then am_discover; fi
+            if ((am_ok)); then
+                exec {am_fd}< <(exec 2>/dev/null
+                    "$am_exe" ${am_cfg:+--config "$am_cfg"} statusline --json <<<"$input" | jq -r "$AM_JQ")
+                am_pid=$!
+            fi
+        fi ;;
+esac
+am_read() { # the answer, waited for 0.8 s at most → am_* variables
+    local line="" rc
+    [ -n "$am_fd" ] || return 0
+    IFS= read -r -t 0.8 -u "$am_fd" line; rc=$?
+    ((rc == 0)) && [[ $line == am_* ]] && eval "$line"
+    # Too slow: stop it rather than leave it running at every refresh.
+    ((rc > 128)) && [ -n "$am_pid" ] && { pkill -P "$am_pid"; kill "$am_pid"; } 2>/dev/null
+    exec {am_fd}<&-
+    return 0
+}
 
 # ── Glyph sets ────────────────────────────────────────────────────────────
 # Nerd Font icons are often drawn wider than their cell and overlap the next
@@ -114,20 +198,58 @@ eval "$(jq -r '
 RST=$'\e[0m'; BOLD=$'\e[1m'; ITAL=$'\e[3m'
 fg() { printf -v REPLY '\e[38;2;%d;%d;%dm' "$1" "$2" "$3"; }
 PATHC=$'\e[38;2;'"${PATH_COLOR}m"
-fg 215 119 87;  ORANGE=$REPLY
-fg 100 180 255; CYAN=$REPLY
-fg 80 200 120;  GREEN=$REPLY
-fg 240 180 50;  YELLOW=$REPLY
-fg 240 80 80;   RED=$REPLY
-fg 255 120 120; RED_HI=$REPLY
-fg 190 130 255; VIOLET=$REPLY
-fg 205 205 215; TEXT=$REPLY
-fg 120 200 255; ICE=$REPLY
-fg 75 75 90;    TRACK=$REPLY
-fg 125 125 140; LABEL=$REPLY
-# hue <degrees> → REPLY "r;g;b" (HSV, saturation 0.7, value 1)
+# Heat gradient green → yellow → red for p in 0..100
+grad() {
+    local p=$1 r g b
+    ((p < 0)) && p=0; ((p > 100)) && p=100
+    if ((p < 50)); then r=$((80 + 160 * p / 50)); g=$((200 - 20 * p / 50)); b=$((120 - 70 * p / 50))
+    else r=240; g=$((180 - 100 * (p - 50) / 50)); b=$((50 + 30 * (p - 50) / 50)); fi
+    printf -v REPLY '\e[38;2;%d;%d;%dm' "$r" "$g" "$b"
+}
+if [ "$THEME" = light ]; then
+    # Darker inks for a light background; tracks and rails fade into it.
+    fg 195 95 55;   ORANGE=$REPLY
+    fg 0 110 190;   CYAN=$REPLY
+    fg 20 140 60;   GREEN=$REPLY
+    fg 175 115 0;   YELLOW=$REPLY
+    fg 200 40 40;   RED=$REPLY
+    fg 235 80 80;   RED_HI=$REPLY
+    fg 130 70 210;  VIOLET=$REPLY
+    fg 40 40 50;    TEXT=$REPLY
+    fg 20 120 190;  ICE=$REPLY
+    fg 200 200 210; TRACK=$REPLY
+    fg 110 110 125; LABEL=$REPLY
+    RAIL_RGB="226;228;232"
+    EFFORT_RGB=("" "120 120 140" "40 110 220" "185 135 0" "215 100 20" "210 40 70")   # low … max
+    ULTRA_RGB=("60;10;140" "85;35;170" "105;55;195" "125;75;215")   # sweep highlight … base
+    HUE_HI=205 HUE_LO=30   # rainbow: HSV value/floor
+    grad() {
+        local p=$1 r g b
+        ((p < 0)) && p=0; ((p > 100)) && p=100
+        if ((p < 50)); then r=$((20 + 170 * p / 50)); g=$((150 - 10 * p / 50)); b=$((70 - 70 * p / 50))
+        else r=$((190 + 15 * (p - 50) / 50)); g=$((140 - 100 * (p - 50) / 50)); b=$((40 * (p - 50) / 50)); fi
+        printf -v REPLY '\e[38;2;%d;%d;%dm' "$r" "$g" "$b"
+    }
+else
+    fg 215 119 87;  ORANGE=$REPLY
+    fg 100 180 255; CYAN=$REPLY
+    fg 80 200 120;  GREEN=$REPLY
+    fg 240 180 50;  YELLOW=$REPLY
+    fg 240 80 80;   RED=$REPLY
+    fg 255 120 120; RED_HI=$REPLY
+    fg 190 130 255; VIOLET=$REPLY
+    fg 205 205 215; TEXT=$REPLY
+    fg 120 200 255; ICE=$REPLY
+    fg 75 75 90;    TRACK=$REPLY
+    fg 125 125 140; LABEL=$REPLY
+    RAIL_RGB="38;42;46"
+    EFFORT_RGB=("" "150 150 170" "100 160 255" "240 190 60" "245 130 50" "240 70 90")
+    ULTRA_RGB=("240;232;255" "215;195;255" "195;165;255" "175;135;255")
+    HUE_HI=255 HUE_LO=77
+fi
+# hue <degrees> → REPLY "r;g;b" (HSV, saturation 0.7)
 hue() {
-    local h=$(( ($1 % 360 + 360) % 360 )) x c=255 m=77 r g b
+    local h=$(( ($1 % 360 + 360) % 360 )) x c=$HUE_HI m=$HUE_LO r g b
     x=$(( (c - m) * (60 - ( h % 120 - 60 < 0 ? 60 - h % 120 : h % 120 - 60 )) / 60 + m ))
     case $((h / 60)) in
         0) r=$c g=$x b=$m ;; 1) r=$x g=$c b=$m ;; 2) r=$m g=$c b=$x ;;
@@ -140,15 +262,6 @@ hue() {
 # shellcheck disable=SC2206  # split on ESC, globbing is off
 vis() { local IFS=$'\e' a t; a=($1); t=${a[0]}; a[0]=; printf -v t '%s' "$t" "${a[@]#*m}"; REPLY=${#t}; }
 
-# Heat gradient green → yellow → red for p in 0..100
-grad() {
-    local p=$1 r g b
-    ((p < 0)) && p=0; ((p > 100)) && p=100
-    if ((p < 50)); then r=$((80 + 160 * p / 50)); g=$((200 - 20 * p / 50)); b=$((120 - 70 * p / 50))
-    else r=240; g=$((180 - 100 * (p - 50) / 50)); b=$((50 + 30 * (p - 50) / 50)); fi
-    printf -v REPLY '\e[38;2;%d;%d;%dm' "$r" "$g" "$b"
-}
-
 # gauge <style> <permille> <width> <colour> → REPLY
 #   colour: "heat" (green → red along the gauge), an escape sequence (lit
 #   cells in that colour), or "plain" (no colour, for the ultracode effect).
@@ -158,7 +271,7 @@ BRAILLE=('⣀' '⣀' '⣄' '⣤' '⣦' '⣶' '⣷' '⣿')
 RAMP=(▁ ▂ ▄ ▆ █)
 PIE_NERD=($'\U000f0766' $'\U000f0a9e' $'\U000f0a9f' $'\U000f0aa0' $'\U000f0aa1' $'\U000f0aa2' $'\U000f0aa3' $'\U000f0aa4' $'\U000f0aa5')
 PIE_UNI=(○ ◔ ◑ ◕ ●)
-RAIL=$'\e[48;2;38;42;46m'; RAILFG=$'\e[38;2;38;42;46m'
+RAIL=$'\e[48;2;'"${RAIL_RGB}m"; RAILFG=$'\e[38;2;'"${RAIL_RGB}m"
 cell_colour() { # cell_colour <colour> <position 0-100> → REPLY
     case $1 in heat) grad "$2" ;; plain) REPLY="" ;; *) REPLY=$1 ;; esac
 }
@@ -265,16 +378,15 @@ violet() {
     for ((i = 0; i < ${#t}; i++)); do
         ch=${t:i:1}
         [[ $ch == ' ' ]] && { out+=' '; continue; }
-        d=$((i - pos)); ((d < 0)) && d=$((-d))
-        case $d in 0) c="240;232;255" ;; 1) c="215;195;255" ;; 2) c="195;165;255" ;; *) c="175;135;255" ;; esac
-        out+=$'\e[1;38;2;'"${c}m$ch"
+        d=$((i - pos)); ((d < 0)) && d=$((-d)); ((d > 3)) && d=3
+        out+=$'\e[1;38;2;'"${ULTRA_RGB[d]}m$ch"
     done
     REPLY="$out$RST"
 }
 ultra_fx() { # ultra_fx <text> → REPLY
     case $ULTRA_EFFECT in
         violet) violet "$1" ;;
-        plain) REPLY=$'\e[1;38;2;175;135;255m'"$1$RST" ;;
+        plain) REPLY=$'\e[1;38;2;'"${ULTRA_RGB[3]}m$1$RST" ;;
         *) shimmer "$1" ;;
     esac
 }
@@ -332,34 +444,6 @@ elif ((now - gts >= 2)); then
 fi
 [ -n "$worktree" ] && in_wt=1
 
-# ── Ultracode detection ───────────────────────────────────────────────────
-# The payload reports ultracode as effort "xhigh"; the real signal is in the
-# transcript (the "/effort ultracode" output, then ultra_effort_enter/exit
-# attachments) or the `ultracode: true` settings key. The transcript is
-# scanned incrementally.
-ultra=0
-if [ "$effort" = xhigh ]; then
-    ucache="$CACHE_DIR/uc-$session_id" off=0 st=""
-    [ -r "$ucache" ] && read -r off st < "$ucache"
-    if [ -r "$transcript" ]; then
-        size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null || echo 0)
-        ((size < off)) && off=0 st=""
-        if ((size > off)); then
-            # Latest of: the /effort command output (written at once) or the
-            # ultra_effort_enter/exit attachment (written with the next turn).
-            last=$(tail -c +$((off + 1)) "$transcript" \
-                | grep -oE '"type":"ultra_effort_e[a-z]*"|<local-command-stdout>Set effort level to [a-z]+' | tail -n 1)
-            case $last in *enter*|*"to ultracode") st=on ;; *exit*|*"Set effort level to "*) st=off ;; esac
-            echo "$size $st" > "$ucache"
-        fi
-    fi
-    if [ "$st" = on ]; then ultra=1
-    elif [ -z "$st" ] && grep -qs '"ultracode"[[:space:]]*:[[:space:]]*true' \
-            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "$project_dir/.claude/settings.json" "$project_dir/.claude/settings.local.json"; then
-        ultra=1
-    fi
-fi
-
 # ── Segments: SEG[name:variant] = rendered string; higher variants are more
 #    compact, a missing variant means "dropped" ─────────────────────────────
 declare -A SEG W NV
@@ -401,47 +485,6 @@ if [ -n "$session_name" ]; then
         # shellcheck disable=SC1111  # typographic quotes are displayed
         put session "${v%:*}" "${LABEL}${ITAL}“${sn}”${RST}"
     done
-fi
-
-# ── Line 1 right: who (output style, agent, vim, model + effort) ──────────
-meta=""
-[ -n "$style" ] && [ "$style" != default ] && meta+="${LABEL}◇ ${style}${RST}  "
-[ -n "$agent" ] && meta+="${VIOLET}@${agent}${RST}  "
-[ -n "$vim_mode" ] && meta+="${BOLD}${vim_mode}${RST}  "
-[ -n "$meta" ] && put meta 0 "${meta%  }"
-
-m="${model/ context/}"; m="${m/1 Million/1M}"
-case $effort in
-    low) lvl=1; fg 150 150 170 ;; medium) lvl=2; fg 100 160 255 ;; high) lvl=3; fg 240 190 60 ;;
-    xhigh) lvl=4; fg 245 130 50 ;; max) lvl=5; fg 240 70 90 ;; *) lvl=0; REPLY="" ;;
-esac
-ecol=$REPLY
-fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts=" ${YELLOW}»${RST}"
-show_model=${ON[model]:-}; show_effort=${ON[effort]:-}
-[ -n "$show_model$show_effort" ] && ON[model]=1
-mname=""; [ -n "$show_model" ] && mname=$m
-mt=""; [ -n "$mname" ] && mt="${TEXT}${mname}${RST}"
-if ((ultra)); then
-    # The effect covers the effort part only (gauge + word), not the model.
-    g=""; [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" 1000 5 plain; g=$REPLY; }
-    for v in 0:ultracode 1:ultra 2: 3:; do
-        word=${v#*:}; [ -n "$show_effort" ] || word=""
-        e="$g${word:+${g:+ }$word}"
-        if [ -n "$e" ]; then ultra_fx "$e"; e=$REPLY; fi
-        case ${v%%:*} in
-            0|1) t="$mt${e:+${mt:+ }$e}" ;;
-            2) t="${mname:+${TEXT}${mname%% *}${RST}}${e:+${mname:+ }$e}" ;;
-            3) t=$e ;;
-        esac
-        [ -n "$t" ] && put model "${v%%:*}" "$t$([ "${v%%:*}" = 0 ] && echo "$fastm" || echo "$fasts")"
-    done
-else
-    g=""; ((lvl)) && [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" $((lvl * 200)) 5 "$ecol"; g=${REPLY:+ $REPLY}; }
-    etxt=""; ((lvl)) && [ -n "$show_effort" ] && etxt=" ${ecol}${effort}${RST}"
-    t="$mt$g$etxt$fastm"; put model 0 "${t# }"
-    t="$mt$g$fasts"; [ -n "$g$mt" ] || t="$mt$etxt$fasts"; put model 1 "${t# }"
-    t="${mname:+${TEXT}${mname%% *}${RST}}$g$fasts"; [ -n "$g$mname" ] || t="$etxt"; put model 2 "${t# }"
-    [ -n "$g" ] && put model 3 "${g# }"
 fi
 
 # ── Line 2 left: budgets (context, 5h, 7d) ────────────────────────────────
@@ -514,8 +557,109 @@ if ((l_add || l_del)); then
     put lines 1 "$d"
 fi
 
+# ── Model and effort: routed by automodel, else Claude Code's own ─────────
+am_read
+ultra=0 arrow=""
+if ((am_routed)) && [ -n "${am_label:-$am_model}" ]; then
+    # "jev → Opus 5.5" with the effort (and mode) automodel chose.
+    model=${am_label:-$am_model} effort=$am_effort
+    arrow="${LABEL}${am_alias:+$am_alias }→${RST} "
+    [ "$am_mode" = ultracode ] && ultra=1
+elif [ "$effort" = xhigh ]; then
+    # Ultracode: the payload reports it as effort "xhigh"; the real signal is in
+    # the transcript (the "/effort ultracode" output, then ultra_effort_enter/exit
+    # attachments) or the `ultracode: true` settings key. The transcript is
+    # scanned incrementally.
+    ucache="$CACHE_DIR/uc-$session_id" off=0 st=""
+    [ -r "$ucache" ] && read -r off st < "$ucache"
+    if [ -r "$transcript" ]; then
+        size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null || echo 0)
+        ((size < off)) && off=0 st=""
+        if ((size > off)); then
+            # Latest of: the /effort command output (written at once) or the
+            # ultra_effort_enter/exit attachment (written with the next turn).
+            last=$(tail -c +$((off + 1)) "$transcript" \
+                | grep -oE '"type":"ultra_effort_e[a-z]*"|<local-command-stdout>Set effort level to [a-z]+' | tail -n 1)
+            case $last in *enter*|*"to ultracode") st=on ;; *exit*|*"Set effort level to "*) st=off ;; esac
+            echo "$size $st" > "$ucache"
+        fi
+    fi
+    if [ "$st" = on ]; then ultra=1
+    elif [ -z "$st" ] && grep -qs '"ultracode"[[:space:]]*:[[:space:]]*true' \
+            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "$project_dir/.claude/settings.json" "$project_dir/.claude/settings.local.json"; then
+        ultra=1
+    fi
+fi
+
+# ── Line 1 right: who (output style, agent, vim, model + effort, route) ───
+meta=""
+[ -n "$style" ] && [ "$style" != default ] && meta+="${LABEL}◇ ${style}${RST}  "
+[ -n "$agent" ] && meta+="${VIOLET}@${agent}${RST}  "
+[ -n "$vim_mode" ] && meta+="${BOLD}${vim_mode}${RST}  "
+[ -n "$meta" ] && put meta 0 "${meta%  }"
+
+m="${model/ context/}"; m="${m/1 Million/1M}"
+case $effort in low) lvl=1 ;; medium) lvl=2 ;; high) lvl=3 ;; xhigh) lvl=4 ;; max) lvl=5 ;; *) lvl=0 ;; esac
+REPLY=""
+# shellcheck disable=SC2086  # "r g b" → three arguments
+((lvl)) && fg ${EFFORT_RGB[lvl]}
+ecol=$REPLY
+fastm="" fasts=""; [ "$fast" = true ] && fastm=" ${YELLOW}» fast${RST}" fasts=" ${YELLOW}»${RST}"
+show_model=${ON[model]:-}; show_effort=${ON[effort]:-}
+[ -n "$show_model$show_effort" ] && ON[model]=1
+mname=""; [ -n "$show_model" ] && mname=$m
+mt=""; [ -n "$mname" ] && mt="${arrow}${TEXT}${mname}${RST}"
+if ((ultra)); then
+    # The effect covers the effort part only (gauge + word), not the model.
+    g=""; [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" 1000 5 plain; g=$REPLY; }
+    for v in 0:ultracode 1:ultra 2: 3:; do
+        word=${v#*:}; [ -n "$show_effort" ] || word=""
+        e="$g${word:+${g:+ }$word}"
+        if [ -n "$e" ]; then ultra_fx "$e"; e=$REPLY; fi
+        case ${v%%:*} in
+            0|1) t="$mt${e:+${mt:+ }$e}" ;;
+            2) t="${mname:+${TEXT}${mname%% *}${RST}}${e:+${mname:+ }$e}" ;;
+            3) t=$e ;;
+        esac
+        [ -n "$t" ] && put model "${v%%:*}" "$t$([ "${v%%:*}" = 0 ] && echo "$fastm" || echo "$fasts")"
+    done
+else
+    g=""; ((lvl)) && [ -n "$show_effort" ] && { gauge "$EFFORT_STYLE" $((lvl * 200)) 5 "$ecol"; g=${REPLY:+ $REPLY}; }
+    etxt=""; ((lvl)) && [ -n "$show_effort" ] && etxt=" ${ecol}${effort}${RST}"
+    t="$mt$g$etxt$fastm"; put model 0 "${t# }"
+    t="$mt$g$fasts"; [ -n "$g$mt" ] || t="$mt$etxt$fasts"; put model 1 "${t# }"
+    t="${mname:+${TEXT}${mname%% *}${RST}}$g$fasts"; [ -n "$g$mname" ] || t="$etxt"; put model 2 "${t# }"
+    [ -n "$g" ] && put model 3 "${g# }"
+fi
+
+# Route: how automodel decided. 0 all text, 1 short, 2 warnings only.
+if ((am_routed)); then
+    r0="" r1="" warn=""
+    ((${#am_issue} > 24)) && am_issue="${am_issue:0:23}…"
+    case $am_state in
+        routed)
+            ((am_conf < 0)) && am_conf=0; ((am_conf > 100)) && am_conf=100
+            if ((am_conf >= 80)); then c=$GREEN; elif ((am_conf >= 60)); then c=$YELLOW; else c=$RED; fi
+            printf -v r0 '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; r1=$r0 ;;
+        default)  r0="${LABEL}default${RST}" r1=$r0 ;;
+        pinned)   r0="${CYAN}pinned${RST}" r1=$r0 ;;
+        fallback) r0="${RED}⚠ fallback${RST}" r1="${RED}⚠${RST}" warn=1 ;;
+        error)    r0="${RED}⚠ ${am_issue:-catalog}${RST}" r1="${RED}⚠${RST}" warn=1 am_issue="" ;;
+    esac
+    if [ -n "$am_issue" ]; then
+        r0+="${r0:+ }${RED}⚠ jev: ${am_issue}${RST}"
+        [ -n "$warn" ] || r1+="${r1:+ }${RED}⚠${RST}"
+        warn=1
+    fi
+    if [ -n "$am_flash" ]; then r0+="${r0:+ }${VIOLET}↻ ${am_flash}${RST}"; r1+="${r1:+ }${VIOLET}↻${RST}"; fi
+    if [ -n "$r0" ]; then
+        put route 0 "$r0"; put route 1 "$r1"
+        [ -n "$warn" ] && put route 2 "${RED}⚠${RST}"
+    fi
+fi
+
 # ── Layout: each line = left block … right block, right-aligned so the right
-#    blocks of both lines line up. Each line degrades step by step. ─────────
+#    blocks of all lines line up. Each line degrades step by step. ──────────
 GAP="  "; GAPW=2
 declare -A V
 join() { # join <seg...> → REPLY, RW
@@ -540,25 +684,48 @@ compose() { # compose "<left segs>" "<right segs>" → REPLY, RW
     printf -v REPLY '%s%*s%s' "$l" "$pad" "" "$r"
     RW=$((lw + pad + rw))
 }
-fit_line() { # fit_line "<left>" "<right>" <steps...>; a step may be "a+b+c"
-    local left=$1 right=$2 step s; shift 2
+# What to give up first, least useful first, whatever the layout: each line
+# follows this order restricted to its own segments; a step naming several
+# segments advances them together.
+PRIORITY=(session lines route lines meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
+          model route "5h 7d" git 7d model)
+declare -A KNOWN=([dir]=1 [git]=1 [session]=1 [meta]=1 [model]=1 [route]=1 [ctx]=1 [5h]=1 [7d]=1 [cache]=1 [cost]=1 [lines]=1)
+fit_line() { # fit_line "<left segs>" "<right segs>" → REPLY, the most detailed line that fits
+    local left=$1 right=$2 step s moved
+    local -A IN
     V=()
     compose "$left" "$right"; ((RW <= tw)) && return
-    for step in "$@"; do
-        for s in ${step//+/ }; do
-            ((${V[$s]:-0} < ${NV[$s]:-0})) && V[$s]=$((${V[$s]:-0} + 1))
+    for s in $left $right; do IN[$s]=1; done
+    for step in "${PRIORITY[@]}"; do
+        moved=0
+        for s in $step; do
+            [ -n "${IN[$s]:-}" ] && ((${V[$s]:-0} < ${NV[$s]:-0})) && { V[$s]=$((${V[$s]:-0} + 1)); moved=1; }
         done
-        compose "$left" "$right"; ((RW <= tw)) && return
+        ((moved)) && { compose "$left" "$right"; ((RW <= tw)) && return; }
+    done
+    return 0
+}
+render_layout() { # render_layout "<left | right; left | right…>" → OUT, one entry per line
+    local IFS=';' specs spec l r L R s
+    # shellcheck disable=SC2206  # split on ";", globbing is off
+    specs=($1); IFS=$' \t\n'
+    OUT=()
+    for spec in "${specs[@]}"; do
+        l=${spec%%|*} r=""; [ "$l" = "$spec" ] || r=${spec#*|}
+        L="" R=""   # known segments only
+        for s in $l; do [ -n "${KNOWN[$s]:-}" ] && L+="$s "; done
+        for s in ${r//|/ }; do [ -n "${KNOWN[$s]:-}" ] && R+="$s "; done
+        [ -n "$L$R" ] || continue
+        fit_line "$L" "$R"; OUT+=("$REPLY")
     done
 }
-
-fit_line "dir git session" "meta model" \
-    session meta model session git git model dir git model git model
-line1=$REPLY
-fit_line "ctx 5h 7d" "cache cost lines" \
-    lines lines cost ctx cache ctx+5h+7d cost cache 5h+7d 7d
-line2=$REPLY
-printf '%s\n%s\n' "$line1" "$line2"
+case $LAYOUT in
+    one) LAYOUT="dir git | model route ctx 5h 7d cache" ;;
+    two) LAYOUT="dir git session | meta model route; ctx 5h 7d | cache cost lines" ;;
+esac
+render_layout "$LAYOUT"
+((${#OUT[@]})) || render_layout "dir git session | meta model route; ctx 5h 7d | cache cost lines"
+printf '%s\n' "${OUT[@]}"
 
 # ── Auto-update: at most one background check a day, never blocking ──────
 if [ "${AGENTLINE_AUTO_UPDATE:-0}" = 1 ] && [ -z "${AGENTLINE_DEMO_GIT:-}" ]; then

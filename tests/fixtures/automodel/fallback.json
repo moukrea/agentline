@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "routed": true,
+  "alias": "jev",
+  "model": "opus-5.5",
+  "label": "Opus 5.5",
+  "effort": "medium",
+  "mode": "",
+  "state": "fallback",
+  "confidence": 0,
+  "pin": "",
+  "issue": "timeout",
+  "flash": "cold",
+  "text": "jev → opus-5.5·medium ⚠ fallback ⚠ jev: timeout ↻ cold"
+}
