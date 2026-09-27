@@ -276,6 +276,8 @@ labelled() { # labelled <jq edit of the answer> → the first line, plain text
 }
 out=$(labelled .)
 CHECK_NAME="routed: the label, not the catalog key"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86$' <<<"$out"
+out=$(labelled '.budget = "over"')
+CHECK_NAME="routed: over automodel's spending cap"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ⚠ budget$' <<<"$out"
 out=$(labelled '.label = ""')
 CHECK_NAME="routed, no label: the name in its text"; check grep -q 'jev → opus-5.5 ●●●●○ xhigh  0.86$' <<<"$out"
 out=$(labelled '.label = "" | .effort = "" | .state = "default" | .text = "jev → opus-5.5 (default)"')

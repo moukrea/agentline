@@ -10,7 +10,8 @@ All notable changes to agentline. Versions follow [Semantic Versioning](https://
   session, the model part shows the model it picked (`jev → Opus 5.5`) and the
   effort gauge the effort it picked; its ultracode mode runs the ultracode effect.
   A new **route** part shows how it decided: confidence, `default`, `pinned`,
-  `⚠ fallback`, `⚠ catalog`, `⚠ jev: <why>` and `↻ switched|compact|cold`.
+  `⚠ fallback`, `⚠ catalog`, `⚠ budget` (over automodel's spending cap),
+  `⚠ jev: <why>` and `↻ switched|compact|cold`.
   automodel is found through its hook in `settings.json` and asked with
   `automodel statusline --json` while the rest renders (0.8 s at most); releases
   without `--json` are never called. `AGENTLINE_AUTOMODEL=auto|off`,

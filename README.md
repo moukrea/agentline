@@ -33,7 +33,7 @@ and capsule bars, as in the demo.
 | Git | Branch, ahead/behind, then staged, modified, untracked, conflicts, stash (see [Glyphs](#glyphs)). Worktrees get their own icon. Cached 2 s per directory. |
 | Model | Claude Code's model, or, when [automodel](#automodel) routes the session, the model it picked: `jev → Opus 5.5`. |
 | Effort | 5-step gauge coloured from `low` to `max`, dots `●●○○○` by default (the effort automodel picked, when it routes). **Ultracode** gets its own effect: by default Claude Code's violet with a sweeping highlight; else a drifting rainbow, or plain violet. |
-| Route | Only when automodel routes the session: how it decided. The confidence `0.86` (green, yellow, red), or `default`, `pinned`, `⚠ fallback`; `⚠ jev: <why>` when its router could not be asked; `↻ switched` for a moment after it changes its mind. See [the route part](#the-route-part). |
+| Route | Only when automodel routes the session: how it decided. The confidence `0.86` (green, yellow, red), or `default`, `pinned`, `⚠ fallback`; `⚠ budget` over automodel's spending cap; `⚠ jev: <why>` when its router could not be asked; `↻ switched` for a moment after it changes its mind. See [the route part](#the-route-part). |
 | Context | Gradient bar and percentage; the percentage pulses above 85 %. |
 | 5h / 7d | Usage bar and percentage. `⚠ 1h20` in red when the current pace reaches the limit before it resets; otherwise the time until reset. |
 | Prompt cache | `🔥 51m` while warm, `⏳ 4m` in the last sixth of its TTL, `🧊 cold` once expired. A cold cache makes the next turn re-read the whole context. |
@@ -321,6 +321,7 @@ prints its segment itself in that setup.
 | `pinned` | Your `/effort` wins: routing pauses until you set it back to its default. |
 | `⚠ fallback` | Jev could not be asked; automodel used its default. |
 | `⚠ catalog` | automodel cannot load its model catalog (the model part keeps Claude Code's). |
+| `⚠ budget` | The session or the day is over automodel's spending cap (yellow). |
 | `⚠ jev: <why>` | Why Jev could not be asked, such as a missing OpenRouter key. |
 | `↻ switched`, `↻ compact`, `↻ cold` | For a moment (automodel's `statusline_flash`, 30 s) after a new decision: a model switch, a compaction, a cold prompt cache. |
 

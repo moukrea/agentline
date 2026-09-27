@@ -106,7 +106,7 @@ declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 am_fd="" am_pid="" am_routed=0
 AM_JQ='def s: (. // "" | tostring | explode | map(select(. >= 32 and . != 127)) | implode);   # no control characters
   if type == "object" and .v == 1 and .routed == true then
-    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_text=\(.text | s) am_routed=1"
+    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_budget=\(.budget | s) am_text=\(.text | s) am_routed=1"
   else "am_routed=0" end'
 am_discover() { # find automodel in settings.json and probe it → cache
     local cmd="" line fd pid rc=0 v val
@@ -693,6 +693,11 @@ if ((am_routed)); then
         fallback) r0="${RED}⚠ fallback${RST}" r1="${RED}⚠${RST}" warn=1 ;;
         error)    r0="${RED}⚠ ${am_issue:-catalog}${RST}" r1="${RED}⚠${RST}" warn=1 am_issue="" ;;
     esac
+    if [ -n "${am_budget:-}" ]; then   # over automodel's spending cap
+        r0+="${r0:+ }${YELLOW}⚠ budget${RST}"
+        [ -n "$warn" ] || r1+="${r1:+ }${YELLOW}⚠${RST}"
+        warn=1
+    fi
     if [ -n "$am_issue" ]; then
         r0+="${r0:+ }${RED}⚠ jev: ${am_issue}${RST}"
         [ -n "$warn" ] || r1+="${r1:+ }${RED}⚠${RST}"
