@@ -1,12 +1,16 @@
 name: CI
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: ShellCheck
         run: shellcheck -S warning install.sh claude/statusline.sh lib/wizard.sh bin/agentline tests/run.sh
       - name: Tests
