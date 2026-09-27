@@ -47,6 +47,13 @@ cache_ours && [ -k "$CACHE_DIR" ] || CACHE_DIR=""
 mine() { # mine <file>: a cache file we may read (in the cache directory, ours, not a symlink)
     [ -n "$CACHE_DIR" ] && [ -n "$1" ] && [ -f "$1" ] && [ -O "$1" ] && [ ! -L "$1" ]
 }
+cache_file() { # cache_file <prefix> <key> → REPLY: "<dir>/<prefix><key, / as %>", or "" (no cache,
+    # or a name too long for the file system: 255 bytes, with room for ".<pid>")
+    local LC_ALL=C
+    REPLY=""; [ -n "$CACHE_DIR" ] || return 0
+    REPLY="$1${2//\//%}"; ((${#REPLY} <= 240)) && REPLY="$CACHE_DIR/$REPLY" || REPLY=""
+    return 0
+}
 [ -n "$CACHE_DIR" ] && [ -z "${AGENTLINE_DEMO_GIT:-}" ] && [ -n "$input" ] && printf '%s' "$input" > "$CACHE_DIR/last-payload.json"
 
 # ── Configuration ─────────────────────────────────────────────────────────
@@ -139,7 +146,7 @@ case $AUTOMODEL in
             exec {am_fd}< <(jq -r "$AM_JQ" <<<"$AGENTLINE_AUTOMODEL_JSON" 2>/dev/null)
         elif [ "${AUTOMODEL_CHAINED:-}" != 1 ]; then
             am_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-            am_cache=""; [ -n "$CACHE_DIR" ] && am_cache="$CACHE_DIR/automodel-${am_settings//\//%}"
+            cache_file automodel- "$am_settings"; am_cache=$REPLY
             am_exe="" am_cfg="" am_ok=0
             # shellcheck source=/dev/null
             if mine "$am_cache"; then . "$am_cache"; fi
@@ -440,7 +447,7 @@ term_width; tw=$((REPLY - 4))   # Claude Code pads the status line
 
 # ── Git (porcelain v2, cached 2 s per directory) ──────────────────────────
 is_git=0 head="" oid="" ahead=0 behind=0 stash=0 staged=0 unstaged=0 untracked=0 conflicts=0 in_wt=0
-gcache=""; [ -n "$CACHE_DIR" ] && gcache="$CACHE_DIR/git-${cwd//\//%}"
+cache_file git- "$cwd"; gcache=$REPLY
 gts=0
 # shellcheck source=/dev/null
 mine "$gcache" && . "$gcache"

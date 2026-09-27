@@ -95,6 +95,11 @@ env PATH="$TMP/nosetsid" XDG_DATA_HOME="$UP/share" AGENTLINE_CONFIG=/dev/null AG
 for _ in $(seq 50); do [ -s "$TMP/update-ran" ] && break; sleep 0.1; done
 CHECK_NAME="auto-update: runs without setsid"; check grep -qx 'update --quiet' "$TMP/update-ran"
 CHECK_NAME="auto-update: once a day"; check test -s "$UP/share/agentline/last-update-check"
+# A directory whose cache file name would pass 255 bytes: no cache, no error.
+LONG="$TMP/$(printf 'a%.0s' {1..120})/$(printf 'b%.0s' {1..120})"; mkdir -p "$LONG"; git -C "$LONG" init -q -b long-path
+out=$(jq --arg c "$LONG" '.cwd = $c | .workspace.current_dir = $c' "$ROOT/tests/fixtures/session.json" \
+    | AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" 2>"$TMP/err" | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="long directory: git shown, no error"; check test ! -s "$TMP/err" -a "$(grep -c '⎇ long-path' <<<"$out")" -eq 1
 
 # Layouts and themes.
 for fx in "$ROOT"/tests/fixtures/*.json; do
