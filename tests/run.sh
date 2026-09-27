@@ -85,6 +85,16 @@ CHECK_NAME="plain xhigh after leaving ultracode"; check grep -q 'xhigh' <<<"$cmd
 CHECK_NAME="no ultracode after leaving it"; check test "$(grep -c 'ultracode' <<<"$cmd_off")" -eq 0
 plain=$(AGENTLINE_CONFIG=/dev/null COLUMNS=200 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="medium effort shown without ultracode"; check grep -q 'medium' <<<"$plain"
+# The daily update check, also where there is no setsid (macOS).
+UP="$TMP/upd"; mkdir -p "$UP/share/agentline/current/bin" "$TMP/nosetsid"
+printf '#!/bin/sh\necho "$*" > %q\n' "$TMP/update-ran" > "$UP/share/agentline/current/bin/agentline"
+chmod +x "$UP/share/agentline/current/bin/agentline"
+for t in jq git ps stty sed mkdir mv; do ln -sf "$(command -v "$t")" "$TMP/nosetsid/$t"; done
+env PATH="$TMP/nosetsid" XDG_DATA_HOME="$UP/share" AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTO_UPDATE=1 COLUMNS=100 \
+    "$BASH" "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" > /dev/null 2>&1
+for _ in $(seq 50); do [ -s "$TMP/update-ran" ] && break; sleep 0.1; done
+CHECK_NAME="auto-update: runs without setsid"; check grep -qx 'update --quiet' "$TMP/update-ran"
+CHECK_NAME="auto-update: once a day"; check test -s "$UP/share/agentline/last-update-check"
 
 # Layouts and themes.
 for fx in "$ROOT"/tests/fixtures/*.json; do

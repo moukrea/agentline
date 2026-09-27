@@ -771,6 +771,8 @@ if [ "${AGENTLINE_AUTO_UPDATE:-0}" = 1 ] && [ -z "${AGENTLINE_DEMO_GIT:-}" ]; th
     [ -r "$data/last-update-check" ] && read -r last < "$data/last-update-check"
     if ((now - ${last:-0} > 86400)) && [ -x "$data/current/bin/agentline" ]; then
         echo "$now" > "$data/last-update-check"
-        (setsid "$data/current/bin/agentline" update --quiet </dev/null >/dev/null 2>&1 &)
+        # In a session of its own where setsid exists (not on macOS).
+        detach=(); command -v setsid >/dev/null && detach=(setsid)
+        ("${detach[@]}" "$data/current/bin/agentline" update --quiet </dev/null >/dev/null 2>&1 &)
     fi
 fi
