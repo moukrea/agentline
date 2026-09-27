@@ -14,15 +14,40 @@
 # shellcheck disable=SC2154  # payload variables are assigned by the jq eval below
 set -f   # no pathname expansion anywhere: unquoted expansions only split words
 export LC_ALL=C.UTF-8
+umask 077   # what this script writes is for this user only
 
 input=$(cat)
 now=${AGENTLINE_NOW:-$EPOCHSECONDS}   # AGENTLINE_NOW pins the clock (demo recording)
 # Claude Code re-renders at most once per second (refreshInterval >= 1), so the
 # animation advances one small step per second; AGENTLINE_FRAME pins it.
 frame=${AGENTLINE_FRAME:-$now}
-CACHE_DIR="${XDG_RUNTIME_DIR:-/tmp}/agentline-$UID"
-[ -d "$CACHE_DIR" ] || mkdir -p "$CACHE_DIR"
-[ -z "${AGENTLINE_DEMO_GIT:-}" ] && [ -n "$input" ] && printf '%s' "$input" > "$CACHE_DIR/last-payload.json"
+
+# ── Cache directory ───────────────────────────────────────────────────────
+# Some cache files are sourced, so the directory must be this user's alone: a
+# real directory (not a symlink), ours, whose mode we set to 700. The sticky
+# bit records that we did (only the owner can set it), so checking the
+# directory costs no process. XDG_RUNTIME_DIR is private and so is macOS's
+# TMPDIR, but /tmp is shared: another user can create agentline-<uid> there
+# first. Then nothing is cached (no file there is read or written): git status
+# and the automodel lookup run at each render.
+CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"; CACHE_DIR="${CACHE_DIR%/}/agentline-$UID"
+cache_ours() { [ -d "$CACHE_DIR" ] && [ ! -L "$CACHE_DIR" ] && [ -O "$CACHE_DIR" ]; }
+# shellcheck disable=SC2174  # the parents, if any, get the umask's 700
+[ -e "$CACHE_DIR" ] || [ -L "$CACHE_DIR" ] || mkdir -p -m 1700 "$CACHE_DIR" 2>/dev/null
+if cache_ours && [ ! -k "$CACHE_DIR" ]; then
+    # Made by agentline before 0.5.0, with the umask's mode: made private once;
+    # if others could write in it, it may hold their files: started afresh.
+    cache_mode=$(ls -ld "$CACHE_DIR" 2>/dev/null)
+    case ${cache_mode:5:1}${cache_mode:8:1} in
+        --) chmod 1700 "$CACHE_DIR" 2>/dev/null ;;
+        *) rm -rf "$CACHE_DIR" 2>/dev/null && mkdir -m 1700 "$CACHE_DIR" 2>/dev/null ;;
+    esac
+fi
+cache_ours && [ -k "$CACHE_DIR" ] || CACHE_DIR=""
+mine() { # mine <file>: a cache file we may read (in the cache directory, ours, not a symlink)
+    [ -n "$CACHE_DIR" ] && [ -n "$1" ] && [ -f "$1" ] && [ -O "$1" ] && [ ! -L "$1" ]
+}
+[ -n "$CACHE_DIR" ] && [ -z "${AGENTLINE_DEMO_GIT:-}" ] && [ -n "$input" ] && printf '%s' "$input" > "$CACHE_DIR/last-payload.json"
 
 # ── Configuration ─────────────────────────────────────────────────────────
 # Environment wins over the config file, which wins over the defaults.
@@ -103,8 +128,9 @@ am_discover() { # find automodel in settings.json and probe it → cache
         ((rc > 128)) && kill "$pid" 2>/dev/null
         exec {fd}<&-
     fi
-    { printf 'am_exe=%q am_cfg=%q am_ok=%d\n' "$am_exe" "$am_cfg" "$am_ok" > "$am_cache.$$" \
+    [ -n "$am_cache" ] && { printf 'am_exe=%q am_cfg=%q am_ok=%d\n' "$am_exe" "$am_cfg" "$am_ok" > "$am_cache.$$" \
         && mv -f "$am_cache.$$" "$am_cache"; } 2>/dev/null
+    return 0
 }
 case $AUTOMODEL in
     off|0) ;;
@@ -113,11 +139,11 @@ case $AUTOMODEL in
             exec {am_fd}< <(jq -r "$AM_JQ" <<<"$AGENTLINE_AUTOMODEL_JSON" 2>/dev/null)
         elif [ "${AUTOMODEL_CHAINED:-}" != 1 ]; then
             am_settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-            am_cache="$CACHE_DIR/automodel-${am_settings//\//%}"
+            am_cache=""; [ -n "$CACHE_DIR" ] && am_cache="$CACHE_DIR/automodel-${am_settings//\//%}"
             am_exe="" am_cfg="" am_ok=0
             # shellcheck source=/dev/null
-            if [ -r "$am_cache" ]; then . "$am_cache"; fi
-            if [ ! -e "$am_cache" ] || [ "$am_settings" -nt "$am_cache" ] || [ "$am_exe" -nt "$am_cache" ]; then am_discover; fi
+            if mine "$am_cache"; then . "$am_cache"; fi
+            if ! mine "$am_cache" || [ "$am_settings" -nt "$am_cache" ] || [ "$am_exe" -nt "$am_cache" ]; then am_discover; fi
             if ((am_ok)); then
                 exec {am_fd}< <(exec 2>/dev/null
                     "$am_exe" ${am_cfg:+--config "$am_cfg"} statusline --json <<<"$input" | jq -r "$AM_JQ")
@@ -193,6 +219,7 @@ eval "$(jq -r '
   @sh "cache_exp=\(.prompt_cache.expires_at | i)",
   @sh "cache_ttl=\(.prompt_cache.ttl | s)"
 ' <<<"$input" 2>/dev/null)"
+sid=${session_id//\//%}   # in cache file names
 
 # ── Palette & helpers (no subshells: results go through REPLY) ────────────
 RST=$'\e[0m'; BOLD=$'\e[1m'; ITAL=$'\e[3m'
@@ -394,8 +421,9 @@ ultra_fx() { # ultra_fx <text> → REPLY
 # ── Terminal width (Claude Code gives us no TTY: use an ancestor's) ───────
 term_width() {
     if [[ $COLUMNS -gt 0 ]] 2>/dev/null; then REPLY=$COLUMNS; return; fi
-    local f="$CACHE_DIR/tty-${session_id:-$PPID}" tty="" pid=$PPID w t pp
-    [ -r "$f" ] && read -r tty < "$f"
+    local f="" tty="" pid=$PPID w t pp
+    [ -n "$CACHE_DIR" ] && f="$CACHE_DIR/tty-${sid:-$PPID}"
+    mine "$f" && read -r tty < "$f"
     if [ -z "$tty" ] || [ ! -e "/dev/$tty" ]; then
         tty=""
         while [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" != 1 ]; do
@@ -403,7 +431,7 @@ term_width() {
             if [ -n "$t" ] && [ "$t" != "?" ]; then tty=$t; break; fi
             pid=$pp
         done
-        [ -n "$tty" ] && echo "$tty" > "$f"
+        [ -n "$tty" ] && [ -n "$f" ] && echo "$tty" > "$f"
     fi
     if [ -n "$tty" ]; then w=$(stty size < "/dev/$tty" 2>/dev/null); w=${w#* }; fi
     [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
@@ -412,10 +440,10 @@ term_width; tw=$((REPLY - 4))   # Claude Code pads the status line
 
 # ── Git (porcelain v2, cached 2 s per directory) ──────────────────────────
 is_git=0 head="" oid="" ahead=0 behind=0 stash=0 staged=0 unstaged=0 untracked=0 conflicts=0 in_wt=0
-gcache="$CACHE_DIR/git-${cwd//\//%}"
+gcache=""; [ -n "$CACHE_DIR" ] && gcache="$CACHE_DIR/git-${cwd//\//%}"
 gts=0
 # shellcheck source=/dev/null
-[ -r "$gcache" ] && . "$gcache"
+mine "$gcache" && . "$gcache"
 if [ -n "${AGENTLINE_DEMO_GIT:-}" ]; then
     # Previews (installer, docs): "branch staged modified untracked ahead behind stash"
     read -r head staged unstaged untracked ahead behind stash <<<"$AGENTLINE_DEMO_GIT"
@@ -438,9 +466,11 @@ elif ((now - gts >= 2)); then
     else
         is_git=0
     fi
-    declare -p is_git head oid ahead behind stash staged unstaged untracked conflicts in_wt \
-        | sed 's/^declare -- //' > "$gcache.$$" 2>/dev/null
-    echo "gts=$now" >> "$gcache.$$"; mv -f "$gcache.$$" "$gcache"
+    if [ -n "$gcache" ]; then
+        declare -p is_git head oid ahead behind stash staged unstaged untracked conflicts in_wt \
+            | sed 's/^declare -- //' > "$gcache.$$" 2>/dev/null
+        echo "gts=$now" >> "$gcache.$$"; mv -f "$gcache.$$" "$gcache"
+    fi
 fi
 [ -n "$worktree" ] && in_wt=1
 
@@ -570,8 +600,9 @@ elif [ "$effort" = xhigh ]; then
     # the transcript (the "/effort ultracode" output, then ultra_effort_enter/exit
     # attachments) or the `ultracode: true` settings key. The transcript is
     # scanned incrementally.
-    ucache="$CACHE_DIR/uc-$session_id" off=0 st=""
-    [ -r "$ucache" ] && read -r off st < "$ucache"
+    ucache="" off=0 st=""; [ -n "$CACHE_DIR" ] && ucache="$CACHE_DIR/uc-$sid"
+    mine "$ucache" && read -r off st < "$ucache"
+    case $off in ""|*[!0-9]*|0?*) off=0 st="" ;; esac   # a plain number, before any arithmetic
     if [ -r "$transcript" ]; then
         size=$(stat -c %s "$transcript" 2>/dev/null || stat -f %z "$transcript" 2>/dev/null || echo 0)
         ((size < off)) && off=0 st=""
@@ -581,7 +612,7 @@ elif [ "$effort" = xhigh ]; then
             last=$(tail -c +$((off + 1)) "$transcript" \
                 | grep -oE '"type":"ultra_effort_e[a-z]*"|<local-command-stdout>Set effort level to [a-z]+' | tail -n 1)
             case $last in *enter*|*"to ultracode") st=on ;; *exit*|*"Set effort level to "*) st=off ;; esac
-            echo "$size $st" > "$ucache"
+            [ -n "$ucache" ] && echo "$size $st" > "$ucache"
         fi
     fi
     if [ "$st" = on ]; then ultra=1

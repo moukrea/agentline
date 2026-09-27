@@ -227,6 +227,58 @@ CHECK_NAME="automodel: absent from settings.json, not routed"; check test ! -s "
 out=$(am_render missing)
 CHECK_NAME="automodel: no settings.json, not routed"; check test ! -s "$TMP/err" -a "$(grep -c 'Jev (auto) ●●○○○ medium$' <<<"$out")" -eq 1
 
+# The cache directory (some of its files are sourced) must be ours alone: in a
+# shared /tmp another user can create agentline-<uid> first. A directory that
+# isn't ours is simulated by a symlink (no chown here). Then nothing there is
+# read or written, and the render is the same as with a private cache.
+secp=$(jq -c '.effort.level = "xhigh"' <<<"$jev")   # xhigh: the ultracode cache is read too
+sec_render() { # sec_render <runtime dir> → both lines, plain text
+    env XDG_RUNTIME_DIR="$1" CLAUDE_CONFIG_DIR="$TMP/sec-claude" AGENTLINE_CONFIG=/dev/null AGENTLINE_NOW="$now" COLUMNS=200 \
+        bash "$ROOT/claude/statusline.sh" <<<"$secp" 2>"$TMP/err" | sed 's/\x1b\[[0-9;]*m//g'
+}
+mode() { ls -ld "$1" | cut -c1-10; }
+snap() { ls -A "$1"; cat "$1"/* 2>/dev/null; }
+mkdir -p "$TMP/sec-ok"; ref=$(sec_render "$TMP/sec-ok")
+CHECK_NAME="cache: created private (700, sticky)"; check test "$(mode "$TMP/sec-ok/agentline-$UID")" = "drwx-----T"
+CHECK_NAME="cache: its files private"; check test "$(mode "$TMP/sec-ok/agentline-$UID/last-payload.json")" = "-rw-------"
+# Files planted as another user would: each runs `touch pwned` if sourced or evaluated.
+P="$TMP/sec-planted"; mkdir -p "$P"; chmod 1700 "$P"
+printf 'is_git=1 head=planted staged=9 gts=%s\ntouch %q\n' "$now" "$TMP/pwned-git" > "$P/git-${REPO//\//%}"
+printf '#!/bin/sh\ntouch %q\n' "$TMP/pwned-exe" > "$TMP/sec-evil"; chmod +x "$TMP/sec-evil"
+sset="$TMP/sec-claude/settings.json"
+printf 'am_exe=%q am_ok=1\ntouch %q\n' "$TMP/sec-evil" "$TMP/pwned-am" > "$P/automodel-${sset//\//%}"
+printf 'x[$(touch %q)] on\n' "$TMP/pwned-uc" > "$P/uc-fx-session"
+p0=$(snap "$P")
+pwned() { ls "$TMP"/pwned-* 2>/dev/null; }
+mkdir -p "$TMP/sec-a"; ln -s "$P" "$TMP/sec-a/agentline-$UID"
+out=$(sec_render "$TMP/sec-a")
+CHECK_NAME="cache, symlinked directory: nothing planted runs"; check test -z "$(pwned)"
+CHECK_NAME="cache, symlinked directory: nothing read (same render), no stderr"; check test "$out" = "$ref" -a ! -s "$TMP/err"
+CHECK_NAME="cache, symlinked directory: nothing written"; check test "$(snap "$P")" = "$p0"
+mkdir -p "$TMP/sec-b"; : > "$TMP/sec-b/agentline-$UID"
+out=$(sec_render "$TMP/sec-b")
+CHECK_NAME="cache, a file in the way: same render, no stderr"; check test "$out" = "$ref" -a ! -s "$TMP/err" -a -f "$TMP/sec-b/agentline-$UID"
+mkdir -p "$TMP/sec-c"; ln -s "$TMP/sec-c-target" "$TMP/sec-c/agentline-$UID"
+out=$(sec_render "$TMP/sec-c")
+CHECK_NAME="cache, dangling symlink: not followed, same render"; check test "$out" = "$ref" -a ! -s "$TMP/err" -a ! -e "$TMP/sec-c-target"
+# Inside our directory, a cache file that is a symlink is not read either.
+ln -sf "$P/git-${REPO//\//%}" "$TMP/sec-ok/agentline-$UID/git-${REPO//\//%}"
+ln -sf "$P/uc-fx-session" "$TMP/sec-ok/agentline-$UID/uc-fx-session"
+out=$(sec_render "$TMP/sec-ok")
+CHECK_NAME="cache, symlinked files: not read, targets untouched"; check test "$out" = "$ref" -a -z "$(pwned)" -a "$(snap "$P")" = "$p0"
+# Made by an older release: private once (kept) if only we could write in it,
+# else started afresh (it may hold others' files, like a symlink to overwrite).
+mkdir -p "$TMP/sec-d/agentline-$UID"; chmod 755 "$TMP/sec-d/agentline-$UID"; echo 1 > "$TMP/sec-d/agentline-$UID/kept"
+out=$(sec_render "$TMP/sec-d")
+CHECK_NAME="cache, from an older release: made private, kept"
+check test "$(mode "$TMP/sec-d/agentline-$UID")" = "drwx-----T" -a -f "$TMP/sec-d/agentline-$UID/kept" -a "$out" = "$ref"
+mkdir -p "$TMP/sec-e/agentline-$UID"; chmod 777 "$TMP/sec-e/agentline-$UID"; echo keep > "$TMP/sec-victim"
+ln -s "$TMP/sec-victim" "$TMP/sec-e/agentline-$UID/last-payload.json"; cp "$P/git-${REPO//\//%}" "$TMP/sec-e/agentline-$UID/"
+out=$(sec_render "$TMP/sec-e")
+CHECK_NAME="cache, world-writable: started afresh, private"; check test "$(mode "$TMP/sec-e/agentline-$UID")" = "drwx-----T" -a "$out" = "$ref"
+CHECK_NAME="cache, world-writable: planted symlink not followed, nothing run"
+check test "$(cat "$TMP/sec-victim")" = keep -a ! -L "$TMP/sec-e/agentline-$UID/last-payload.json" -a -z "$(pwned)"
+
 # ── Claude Code ────────────────────────────────────────────────────────────
 echo "claude code"
 mkdir -p "$HOME/.claude"
