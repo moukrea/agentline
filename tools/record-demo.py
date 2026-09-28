@@ -122,15 +122,18 @@ def scenario(name):
         p['effort'] = {'level': 'xhigh'}
     elif name.startswith('effort:'):
         p['effort'] = {'level': name[7:]}
+    elif name == 'tomorrow':   # the 5-hour window resets tomorrow morning
+        p['rate_limits']['five_hour']['resets_at'] = NOW + 83940
     elif name == 'jev':   # a session on automodel's custom model: Claude Code only knows "Jev (auto)"
         p.update(session_id='agentline-demo-jev', model={'id': 'jev', 'display_name': 'Jev (auto)'})
         p['effort'] = {'level': 'medium'}
     return p
 
-def routed(model, label, effort, confidence, state='routed', mode='', flash='', pin='', issue=''):
+def routed(model, label, effort, confidence, state='routed', mode='', flash='', pin='', issue='', claude_effort=''):
     """automodel's `statusline --json` answer for the jev session."""
     return json.dumps(dict(v=1, routed=True, alias='jev', model=model, label=label, effort=effort, mode=mode,
-                           state=state, confidence=confidence, pin=pin, issue=issue, flash=flash, text=''))
+                           state=state, confidence=confidence, pin=pin, issue=issue, flash=flash, budget='',
+                           claude_effort=claude_effort, text=''))
 
 # The installer's defaults on a machine with a Nerd Font.
 DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='pie', EFFORT_STYLE='dots', ULTRA_EFFECT='violet',
@@ -141,7 +144,7 @@ DEFAULT = dict(GLYPHS='nerd', BAR='capsule', COMPACT_STYLE='pie', EFFORT_STYLE='
 def render(cols, scen, frame, opts):
     env = {k: v for k, v in os.environ.items()   # nothing from this machine's Claude Code or agentline
            if not k.startswith(('AGENTLINE_', 'CLAUDE_', 'AUTOMODEL_'))}
-    env.update(HOME='/home/you', COLUMNS=str(cols), AGENTLINE_CONFIG='/dev/null', AGENTLINE_NOW=str(NOW),
+    env.update(HOME='/home/you', TZ='UTC', COLUMNS=str(cols), AGENTLINE_CONFIG='/dev/null', AGENTLINE_NOW=str(NOW),
                AGENTLINE_FRAME=str(frame), AGENTLINE_DEMO_GIT='feat/export 2 1 3 1 0 1',
                XDG_RUNTIME_DIR=tempfile.gettempdir())
     env.update({'AGENTLINE_' + k: v for k, v in opts})
@@ -153,7 +156,7 @@ def render(cols, scen, frame, opts):
 SGR = re.compile(r'\x1b\[([0-9;]*)m')
 
 def parse(line, fg0):
-    st = dict(fg=fg0, bg=None, bold=False, italic=False, dim=False)
+    st = dict(fg=fg0, bg=None, bold=False, italic=False, dim=False, strike=False)
     cells, pos = [], 0
     for m in SGR.finditer(line + '\x1b[m'):
         for ch in line[pos:m.start()]:
@@ -163,10 +166,12 @@ def parse(line, fg0):
         i = 0
         while i < len(codes):
             c = codes[i]
-            if c == 0: st.update(fg=fg0, bg=None, bold=False, italic=False, dim=False)
+            if c == 0: st.update(fg=fg0, bg=None, bold=False, italic=False, dim=False, strike=False)
             elif c == 1: st['bold'] = True
             elif c == 2: st['dim'] = True
             elif c == 3: st['italic'] = True
+            elif c == 9: st['strike'] = True
+            elif c == 29: st['strike'] = False
             elif c == 22: st.update(bold=False, dim=False)
             elif c == 39: st['fg'] = fg0
             elif c in (38, 48) and i + 4 < len(codes) and codes[i + 1] == 2:
@@ -220,6 +225,7 @@ def draw_line(img, d, x0, y, line, term):
         else:
             f = F['nerd'] if 0xE000 <= o <= 0xF8FF or o >= 0xF0000 else F['b' if st['bold'] else 'i' if st['italic'] else 'r']
             d.text((x + (CW * span) / 2, y + LH / 2), ch, font=f, fill=fg, anchor='mm')
+        if st['strike']: d.line([x, y + LH / 2, x + CW * span, y + LH / 2], fill=fg, width=1)
         x += CW * span
 
 def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', '', ''), **opts):
@@ -303,6 +309,7 @@ fade(screen(scen='expiring', frame=0, caption=cap))
 for f in range(3):
     hold(screen(scen='expiring', frame=f, caption=cap), 1000)
 show(screen(scen='cold', caption=('Live state · prompt cache', 'cold', 'the next turn re-reads the context')), 1400)
+show(screen(scen='tomorrow', caption=('Live state · usage', 'resets tomorrow', 'the day and local time, not only the duration')), 2000)
 for effect, n in [('violet', 6), ('rainbow', 6), ('plain', 1)]:
     cap = ('AGENTLINE_ULTRA_EFFECT', effect, ('default · ' if effect == 'violet' else '') + 'in an ultracode session · 1 frame per second')
     fade(screen(scen='ultra', frame=0, ULTRA_EFFECT=effect, caption=cap))
@@ -312,11 +319,13 @@ for effect, n in [('violet', 6), ('rainbow', 6), ('plain', 1)]:
 jev = lambda **kw: dict(scen='jev', AUTOMODEL='auto', **kw)
 opus = routed('opus-5.5', 'Opus 5.5', 'xhigh', 0.86)
 show(screen(**jev(AUTOMODEL_JSON=opus), caption=('With automodel', 'routed session',
-            'the model and effort picked for this prompt, and how sure the router is')), 2400)
+            'the model and effort picked, and how sure the router is')), 2400)
 cap = ('With automodel · next prompt', 'rerouted', 'flagged for a few seconds')
 fade(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74, flash='switched')), caption=cap))
 hold(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74, flash='switched')), caption=cap), 1800)
 hold(screen(**jev(AUTOMODEL_JSON=routed('sonnet-5', 'Sonnet 5', 'medium', 0.74)), caption=cap), 900)
+show(screen(**jev(AUTOMODEL_JSON=routed('opus-5.5', 'Opus 5.5', 'medium', 0.82, claude_effort='xhigh')),
+            caption=('With automodel', 'real effort', "what Claude Code shows is struck through")), 2200)
 cap = ('With automodel', 'ultracode', 'picked by the router, drawn with AGENTLINE_ULTRA_EFFECT · 1 frame per second')
 for f in range(4):
     am = routed('opus-5.5', 'Opus 5.5', 'xhigh', 0.91, mode='ultracode', flash='switched' if f < 2 else '')
