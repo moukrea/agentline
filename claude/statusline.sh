@@ -574,7 +574,7 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
         # (Tue 9:00)", so a reset tomorrow morning is not read as this morning.
         local d t0 t1
         printf -v t0 '%(%Y%m%d)T' "$now"; printf -v t1 '%(%Y%m%d)T' "$reset"
-        if [ "$t0" != "$t1" ]; then
+        if ((left > 0)) && [ "$t0" != "$t1" ]; then
             printf -v d '%(%a %H:%M)T' "$reset"; d=${d/ 0/ }
             day=" ${LABEL}(${d})${RST}"
         fi
