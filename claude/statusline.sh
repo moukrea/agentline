@@ -682,16 +682,22 @@ fi
 # Route: how automodel decided. 0 all text, 1 short, 2 warnings only.
 if ((am_routed)); then
     r0="" r1="" warn=""
+    # Claude Code shows its own effort (spinner, /effort); automodel may run
+    # another one per turn over that base to keep the cache. Right after the
+    # real effort: "not xhigh", the shown one struck through.
+    if [ -n "${am_ceffort:-}" ] && [ -n "$am_effort" ]; then
+        r0="${LABEL}not "$'\e[9m'"${am_ceffort}${RST}" r1=$r0
+    fi
     ((${#am_issue} > 24)) && am_issue="${am_issue:0:23}…"
     case $am_state in
         routed)
             ((am_conf < 0)) && am_conf=0; ((am_conf > 100)) && am_conf=100
             if ((am_conf >= 80)); then c=$GREEN; elif ((am_conf >= 60)); then c=$YELLOW; else c=$RED; fi
-            printf -v r0 '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; r1=$r0 ;;
-        default)  r0="${LABEL}default${RST}" r1=$r0 ;;
-        pinned)   r0="${CYAN}pinned${RST}" r1=$r0 ;;
-        fallback) r0="${RED}⚠ fallback${RST}" r1="${RED}⚠${RST}" warn=1 ;;
-        error)    r0="${RED}⚠ ${am_issue:-catalog}${RST}" r1="${RED}⚠${RST}" warn=1 am_issue="" ;;
+            printf -v c '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; r0+="${r0:+ }$c" r1+="${r1:+ }$c" ;;
+        default)  r0+="${r0:+ }${LABEL}default${RST}" r1+="${r1:+ }${LABEL}default${RST}" ;;
+        pinned)   r0+="${r0:+ }${CYAN}pinned${RST}" r1+="${r1:+ }${CYAN}pinned${RST}" ;;
+        fallback) r0+="${r0:+ }${RED}⚠ fallback${RST}" r1+="${r1:+ }${RED}⚠${RST}" warn=1 ;;
+        error)    r0+="${r0:+ }${RED}⚠ ${am_issue:-catalog}${RST}" r1+="${r1:+ }${RED}⚠${RST}" warn=1 am_issue="" ;;
     esac
     if [ -n "${am_budget:-}" ]; then   # over automodel's spending cap
         r0+="${r0:+ }${YELLOW}⚠ budget${RST}"
@@ -702,12 +708,6 @@ if ((am_routed)); then
         r0+="${r0:+ }${RED}⚠ jev: ${am_issue}${RST}"
         [ -n "$warn" ] || r1+="${r1:+ }${RED}⚠${RST}"
         warn=1
-    fi
-    # Claude Code shows its own effort (spinner, /effort); automodel may run
-    # another one per turn over that base to keep the cache: say which is real.
-    if [ -n "${am_ceffort:-}" ] && [ -n "$am_effort" ]; then
-        r0+="${r0:+ }${LABEL}real effort: ${RST}${TEXT}${am_effort}${RST}${LABEL} (Claude Code shows ${am_ceffort})${RST}"
-        r1+="${r1:+ }${LABEL}(CC: ${am_ceffort})${RST}"
     fi
     if [ -n "$am_flash" ]; then r0+="${r0:+ }${VIOLET}↻ ${am_flash}${RST}"; r1+="${r1:+ }${VIOLET}↻${RST}"; fi
     if [ -n "$r0" ]; then

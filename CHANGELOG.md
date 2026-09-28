@@ -2,6 +2,14 @@
 
 All notable changes to agentline. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.5.2 - 2026-09-28
+
+### Changed
+
+- The effort mismatch is shorter and reads the right way round: `medium  not ~~xhigh~~`
+  (the effort Claude Code shows, struck through) instead of
+  `real effort: medium (Claude Code shows xhigh)` / `(CC: xhigh)`.
+
 ## 0.5.1 - 2026-09-28
 
 ### Added

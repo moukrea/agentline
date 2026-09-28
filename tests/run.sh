@@ -279,7 +279,7 @@ CHECK_NAME="routed: the label, not the catalog key"; check grep -q 'jev → Opus
 out=$(labelled '.budget = "over"')
 CHECK_NAME="routed: over automodel's spending cap"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ⚠ budget$' <<<"$out"
 out=$(labelled '.effort = "low" | .claude_effort = "xhigh"')
-CHECK_NAME="routed: the real effort when Claude Code shows another"; check grep -q 'jev → Opus 5.5 ●○○○○ low  0.86 real effort: low (Claude Code shows xhigh)$' <<<"$out"
+CHECK_NAME="routed: the real effort when Claude Code shows another"; check grep -q 'jev → Opus 5.5 ●○○○○ low  not xhigh 0.86$' <<<"$out"
 out=$(labelled '.label = ""')
 CHECK_NAME="routed, no label: the name in its text"; check grep -q 'jev → opus-5.5 ●●●●○ xhigh  0.86$' <<<"$out"
 out=$(labelled '.label = "" | .effort = "" | .state = "default" | .text = "jev → opus-5.5 (default)"')

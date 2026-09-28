@@ -321,7 +321,7 @@ prints its segment itself in that setup.
 | `pinned` | Your `/effort` wins: routing pauses until you set it back to its default. |
 | `⚠ fallback` | Jev could not be asked; automodel used its default. |
 | `⚠ catalog` | automodel cannot load its model catalog (the model part keeps Claude Code's). |
-| `real effort: low (Claude Code shows xhigh)` | automodel runs another effort than the one Claude Code displays (its spinner, `/effort`): per-turn effort over a fixed base keeps the prompt cache. The model part shows the real one. Compact: `(CC: xhigh)`. Needs automodel 0.9.0 or later. |
+| `not ~~xhigh~~` | Right after the effort: automodel runs that effort, not the one Claude Code displays (its spinner, `/effort`), which is struck through. Per-turn effort over a fixed base keeps the prompt cache. Needs automodel 0.9.0 or later. |
 | `⚠ budget` | The session or the day is over automodel's spending cap (yellow). |
 | `⚠ jev: <why>` | Why Jev could not be asked, such as a missing OpenRouter key. |
 | `↻ switched`, `↻ compact`, `↻ cold` | For a moment (automodel's `statusline_flash`, 30 s) after a new decision: a model switch, a compaction, a cold prompt cache. |
