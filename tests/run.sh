@@ -79,7 +79,7 @@ rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940 | 
 CHECK_NAME="reset tomorrow: the day and time"; check grep -q '5h ██▋ *27% ↻23h19 (Tue 13:32)' <<<"$rs"
 CHECK_NAME="reset today: no day"; check grep -q '↻1h00  ' <<<"$rs"
 seg=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_SEGMENTS="dir ctx" COLUMNS=160 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
-CHECK_NAME="segments: hidden parts are gone"; check test "$(grep -c 'Opus\|5h\|cache' <<<"$seg")" -eq 0
+CHECK_NAME="segments: hidden parts are gone"; check test "$(grep -Ec 'Opus|5h|cache' <<<"$seg")" -eq 0
 CHECK_NAME="segments: shown parts stay"; check grep -q 'context' <<<"$seg"
 
 ultra=$(jq --arg tr "$ROOT/tests/fixtures/ultra-transcript.jsonl" '.transcript_path = $tr' "$ROOT/tests/fixtures/ultra.json" \
@@ -146,7 +146,7 @@ check test -z "$(cat "$TMP/err")" -a "$(printf '%s\n' "$custom" | wc -l)" -eq 2
 CHECK_NAME="layout custom: parts where asked"
 check grep -q '^jev → Opus 5.5.* 0.86 .*/tmp$' <<<"$(head -1 <<<"$custom")"
 CHECK_NAME="layout custom: second line"; check grep -q '^context .*5h .*\$10.28 in' <<<"$(tail -1 <<<"$custom")"
-CHECK_NAME="layout custom: parts left out stay out"; check test "$(grep -c '7d\|cache\|edits\|Refactor' <<<"$custom")" -eq 0
+CHECK_NAME="layout custom: parts left out stay out"; check test "$(grep -Ec '7d|cache|edits|Refactor' <<<"$custom")" -eq 0
 three=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='dir; model; ctx | cost' COLUMNS=100 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
 CHECK_NAME="layout custom: three lines"; check test "$(printf '%s\n' "$three" | wc -l)" -eq 3
 none=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_LAYOUT='bogus | nothing' COLUMNS=100 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json")
@@ -185,7 +185,7 @@ routed() { # routed <answer> [env...] → the first line, plain text, at 200 col
 }
 out=$(routed routed)
 CHECK_NAME="routed: model and routed effort"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ↻ switched$' <<<"$out"
-CHECK_NAME="routed: Claude Code's model and effort replaced"; check test "$(grep -c 'Jev (auto)\|medium' <<<"$out")" -eq 0
+CHECK_NAME="routed: Claude Code's model and effort replaced"; check test "$(grep -Ec 'Jev \(auto\)|medium' <<<"$out")" -eq 0
 CHECK_NAME="routed: pinned, issue"; check grep -q 'jev → Sonnet 5 ●●●○○ high  pinned ⚠ jev: no OpenRouter key$' <<<"$(routed pinned)"
 CHECK_NAME="routed: fallback, flash"; check grep -q 'Opus 5.5 ●●○○○ medium  ⚠ fallback ⚠ jev: timeout ↻ cold$' <<<"$(routed fallback)"
 CHECK_NAME="routed: default, model key, issue truncated"; check grep -q 'jev → haiku-5 ●○○○○ low  default ⚠ jev: OpenRouter key rejected…$' <<<"$(routed default)"
@@ -195,7 +195,7 @@ out=$(jq -c . "$ROOT/tests/fixtures/automodel/ultracode.json" | { read -r a; AGE
     AGENTLINE_ULTRA_EFFECT=plain COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev"; })
 CHECK_NAME="routed: ultracode effect drawn"; check grep -q $'\e\\[1;38;2;175;135;255m●●●●● ultracode' <<<"$out"
 out=$(routed routed AGENTLINE_SEGMENTS="dir model effort ctx")
-CHECK_NAME="routed: route hidden when not in the segments"; check test "$(grep -c '0.86\|↻' <<<"$out")" -eq 0
+CHECK_NAME="routed: route hidden when not in the segments"; check test "$(grep -Ec '0.86|↻' <<<"$out")" -eq 0
 CHECK_NAME="routed: model still routed without the route"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh$' <<<"$out"
 out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON='{"v":1,"routed":false}' COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="not routed: Claude Code's model"; check grep -q 'Jev (auto) ●●○○○ medium$' <<<"$(head -1 <<<"$out")"
@@ -417,7 +417,7 @@ CHECK_NAME="over automodel: says the routing is off"; check grep -q 'AGENTLINE_A
 : > "$TMP/am-new/argv"
 out=$("${aenv[@]}" COLUMNS=160 bash "$AH/home/.local/share/agentline/claude-statusline.sh" <<<"$jev" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="options: the saved layout is used"; check test "$(printf '%s
-' "$out" | wc -l)" -eq 2 -a "$(grep -c 'cache\|edits' <<<"$out")" -eq 0
+' "$out" | wc -l)" -eq 2 -a "$(grep -Ec 'cache|edits' <<<"$out")" -eq 0
 CHECK_NAME="options: automodel off, never called"; check test ! -s "$TMP/am-new/argv"
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes --automodel auto > /dev/null 2>&1
 out=$("${aenv[@]}" COLUMNS=160 bash "$AH/home/.local/share/agentline/claude-statusline.sh" <<<"$jev" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
@@ -426,7 +426,7 @@ sum1=$(cd "$AH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/am-second.log" 2>&1
 sum2=$(cd "$AH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 CHECK_NAME="over automodel: second install changes nothing"; check test "$sum1" = "$sum2"
-CHECK_NAME="over automodel: second install reports unchanged, no note"; check test "$(grep -v 'in your PATH' "$TMP/am-second.log" | grep -c '✓\|!')" -eq 0
+CHECK_NAME="over automodel: second install reports unchanged, no note"; check test "$(grep -v 'in your PATH' "$TMP/am-second.log" | grep -Ec '✓|!')" -eq 0
 "${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/am-uninstall.log" 2>&1
 CHECK_NAME="over automodel: uninstall gives automodel its statusLine back"
 check test "$(jq -S . "$asettings")" = "$(jq -S . "$TMP/am-orig.json")"
@@ -461,7 +461,7 @@ migrate() { # migrate "<segments line>" [install options...] → the config afte
 migrate 'AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines"'
 CHECK_NAME="migration: route after effort"; check grep -qx 'AGENTLINE_SEGMENTS="dir git session meta model effort route ctx 5h 7d cache cost lines"' "$aconf"
 CHECK_NAME="migration: version 2"; check test "$(grep -cx 'AGENTLINE_CONFIG_VERSION=2' "$aconf")" -eq 1
-CHECK_NAME="migration: the rest of the config kept"; check test "$(grep -c '^# old$\|^AGENTLINE_GLYPHS=unicode$\|^AGENTLINE_AUTO_UPDATE=0$' "$aconf")" -eq 3
+CHECK_NAME="migration: the rest of the config kept"; check test "$(grep -Ec '^# old$|^AGENTLINE_GLYPHS=unicode$|^AGENTLINE_AUTO_UPDATE=0$' "$aconf")" -eq 3
 CHECK_NAME="migration: reported"; check grep -q 'route (automodel) added' "$TMP/migrate.log"
 c1=$("${SHA[@]}" < "$aconf")
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/migrate2.log" 2>&1
@@ -620,7 +620,7 @@ if git -C "$ROOT" rev-parse --git-dir > /dev/null 2>&1; then
     for f in install.sh VERSION README.md LICENSE claude/statusline.sh codex/preset lib/wizard.sh lib/sample.json bin/agentline; do
         CHECK_NAME="release tarball: $f"; check grep -qx "$f" <<<"$files"
     done
-    CHECK_NAME="release tarball: no demo, tools, tests or CI"; check test "$(grep -c '^docs/demo.gif$\|^tools/\|^tests/\|^\.github/' <<<"$files")" -eq 0
+    CHECK_NAME="release tarball: no demo, tools, tests or CI"; check test "$(grep -Ec '^docs/demo.gif$|^tools/|^tests/|^\.github/' <<<"$files")" -eq 0
 fi
 "${benv[@]}" "$BH/home/.local/bin/agentline" uninstall > /dev/null 2>&1
 CHECK_NAME="uninstall: command removed"; check test ! -e "$BH/home/.local/bin/agentline"
@@ -638,7 +638,7 @@ CHECK_NAME="mirror: Codex follows the Claude Code parts"
 check test "$(items "$NH/home/.codex/config.toml")" = "current-dir,context-used,weekly-limit"
 "${nenv[@]}" "$ROOT/install.sh" --yes --codex --codex-mirror off > /dev/null 2>&1
 CHECK_NAME="mirror off: preset items"
-check test "$(items "$NH/home/.codex/config.toml")" = "$(grep -v '^[[:space:]]*\(#\|$\)' "$ROOT/codex/preset" | paste -sd, -)"
+check test "$(items "$NH/home/.codex/config.toml")" = "$(grep -Ev '^[[:space:]]*(#|$)' "$ROOT/codex/preset" | paste -sd, -)"
 
 echo "$pass passed, $fail failed"
 exit $((fail > 0))

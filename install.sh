@@ -361,7 +361,7 @@ claude_install() {
     # (the model and effort it chose, and the route part) by asking automodel.
     if is_am_statusline "$current_cmd"; then
         note "the status line was automodel's: agentline now shows automodel's routing itself"
-        if grep -qx 'AGENTLINE_AUTOMODEL=\(off\|0\)' "$CONF" 2>/dev/null; then
+        if grep -Eqx 'AGENTLINE_AUTOMODEL=(off|0)' "$CONF" 2>/dev/null; then
             note "AGENTLINE_AUTOMODEL=off hides it: agentline install --automodel auto"
         elif am_find && ! am_has_json; then
             note "this automodel release has no \`statusline --json\`: update it (automodel update) to see its routing here"
@@ -418,7 +418,7 @@ codex_render() { # codex_render install|uninstall < config.toml > config.toml
         [ -n "$list" ] || grep -q '^AGENTLINE_SEGMENTS=' "$CONF" || list=$(mirror_items "$ALL_SEGMENTS")
     fi
     [ -n "$list" ] || list=$(sed -n 's/^AGENTLINE_CODEX_ITEMS="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONF" 2>/dev/null)
-    [ -n "$list" ] || list=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
+    [ -n "$list" ] || list=$(grep -Ev '^[[:space:]]*(#|$)' "$SRC/codex/preset" | tr '\n' ' ')
     items=$(printf '%s\n' $list | sed 's/.*/"&"/' | paste -sd, - | sed 's/,/, /g')
     awk -v mode="$1" -v tag="$TAG" -v items="$items" '
         # out(): print, flushing the blank lines held back before it.
@@ -478,7 +478,7 @@ codex_install() {
     if cmp -s "$out" "$CODEX_CONFIG"; then rm -f "$out"; same "tui.status_line in $CODEX_CONFIG"; return 0; fi
     backup_once "$CODEX_CONFIG"
     write_file "$CODEX_CONFIG" 600 < "$out" || true; rm -f "$out"
-    ok "tui.status_line in $CODEX_CONFIG ($(grep -cv '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset") items)"
+    ok "tui.status_line in $CODEX_CONFIG ($(grep -Ecv '^[[:space:]]*(#|$)' "$SRC/codex/preset") items)"
 }
 
 codex_uninstall() {
