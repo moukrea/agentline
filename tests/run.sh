@@ -450,8 +450,8 @@ CHECK_NAME="automodel gone: its status line is not restored"; check test "$(jq -
 # Without automodel's hooks, uninstall restores exactly what was there.
 jq -n '{statusLine: {type: "command", command: "mine"}}' > "$asettings"
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
-"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > /dev/null 2>&1
-CHECK_NAME="no automodel: uninstall restores your status line"; check test "$(jq -c .statusLine "$asettings")" = '{"type":"command","command":"mine"}'
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/un.log" 2>&1
+CHECK_NAME="no automodel: uninstall restores your status line (got $(jq -c .statusLine "$asettings"); $(tr '\n' ' ' < "$TMP/un.log"))"; check test "$(jq -c .statusLine "$asettings")" = '{"type":"command","command":"mine"}'
 # Configs from before 0.5.0: a saved list of parts gets "route", once.
 migrate() { # migrate "<segments line>" [install options...] → the config afterwards
     local line=$1; shift
