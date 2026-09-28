@@ -42,6 +42,7 @@ CODEX_CONFIG="$CODEX_DIR/config.toml"
 TAG='# agentline'
 
 FONTS_URL="https://github.com/$REPO/blob/main/docs/fonts.md"
+WIN=0; case $OSTYPE in msys*|cygwin*) WIN=1 ;; esac   # Git Bash on Windows (install.ps1)
 die() { echo "agentline: $*" >&2; exit 1; }
 
 # Is a Nerd Font installed? (AGENTLINE_ASSUME_NERD=1/0 overrides, for tests.)
@@ -49,7 +50,9 @@ have_nerd_font() {
     if [ -n "${AGENTLINE_ASSUME_NERD:-}" ]; then [ "$AGENTLINE_ASSUME_NERD" = 1 ]; return; fi
     if command -v fc-list >/dev/null 2>&1 && fc-list : family 2>/dev/null | grep -qi 'nerd font'; then return 0; fi
     local d
-    for d in "$HOME/Library/Fonts" /Library/Fonts "$HOME/.local/share/fonts" "$HOME/.fonts"; do
+    local win=()
+    ((WIN)) && win=("${LOCALAPPDATA:-$HOME/AppData/Local}/Microsoft/Windows/Fonts" "${WINDIR:-C:/Windows}/Fonts")
+    for d in "$HOME/Library/Fonts" /Library/Fonts "$HOME/.local/share/fonts" "$HOME/.fonts" "${win[@]}"; do
         [ -d "$d" ] && [ -n "$(find "$d" -iname '*nerd*' -print -quit 2>/dev/null)" ] && return 0
     done
     return 1
@@ -319,6 +322,13 @@ backup_once() { # the first backup is the pre-agentline state; never overwritten
 # is kept, so running the installer from another PATH changes nothing.
 statusline_cmd() { # statusline_cmd "<current command>" → REPLY
     local script="\"$DATA/claude-statusline.sh\"" b=""
+    if ((WIN)); then
+        # Windows: C:/… paths, which Git Bash and cmd.exe both run, and Git's
+        # bin/bash.exe, which sets up the PATH (jq, git) whoever starts it.
+        b="$(cygpath -m /)/bin/bash.exe"; [ -x "$b" ] || b=$(cygpath -m "$BASH")
+        REPLY="\"$b\" \"$(cygpath -m "$DATA/claude-statusline.sh")\""
+        return
+    fi
     [[ $1 == *" $script" ]] && b=${1%" $script"} && b=${b#\"} && b=${b%\"}
     [[ $b == /* && -x $b ]] && "$b" -c '((BASH_VERSINFO[0] >= 5))' 2>/dev/null || b=$BASH
     [[ $b =~ ^[A-Za-z0-9_./+-]+$ ]] || b="\"$b\""
@@ -326,7 +336,7 @@ statusline_cmd() { # statusline_cmd "<current command>" → REPLY
 }
 claude_install() {
     say "Claude Code"
-    command -v jq >/dev/null || { note "jq is required (apt install jq / brew install jq)"; return 1; }
+    command -v jq >/dev/null || { note "jq is required (apt install jq / brew install jq / winget install jqlang.jq)"; return 1; }
     mkdir -p "$DATA" "$CLAUDE_DIR"
     if write_file "$DATA/claude-statusline.sh" 755 < "$SRC/claude/statusline.sh"; then ok "script → $DATA/claude-statusline.sh"
     else same "script"; fi
@@ -495,7 +505,10 @@ sources_install() {
         fi
     fi
     mkdir -p "$BIN_DIR"
-    if [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ]; then same "command $BIN_DIR/agentline"
+    if ((WIN)); then   # no symlinks without developer mode: a two-line wrapper
+        if printf '#!/usr/bin/env bash\nexec bash "%s" "$@"\n' "$DATA/current/bin/agentline" | write_file "$BIN_DIR/agentline" 755; then
+            ok "command $BIN_DIR/agentline"; else same "command $BIN_DIR/agentline"; fi
+    elif [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ]; then same "command $BIN_DIR/agentline"
     else ln -sfn "$DATA/current/bin/agentline" "$BIN_DIR/agentline"; ok "command $BIN_DIR/agentline"; fi
     case ":$PATH:" in *":$BIN_DIR:"*) ;; *) ((quiet)) || note "$BIN_DIR is not in your PATH: add it to use the agentline command" ;; esac
 }
@@ -556,7 +569,8 @@ EOF
 if ((uninstall)); then
     ((do_claude)) && claude_uninstall
     ((do_codex)) && codex_uninstall
-    [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ] && rm -f "$BIN_DIR/agentline"
+    { [ "$(readlink "$BIN_DIR/agentline" 2>/dev/null)" = "$DATA/current/bin/agentline" ] \
+        || { ((WIN)) && grep -qs "$DATA/current/bin/agentline" "$BIN_DIR/agentline"; }; } && rm -f "$BIN_DIR/agentline"
     rm -rf "$DATA/current" "$DATA/targets" "$DATA/last-update-check"
     rmdir "$DATA" 2>/dev/null || true
     ((purge)) && rm -rf "$CONF_DIR" && ok "config removed"

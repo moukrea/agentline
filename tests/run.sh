@@ -4,6 +4,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fail=0 pass=0
+SHA=(sha256sum); command -v sha256sum >/dev/null || SHA=(shasum -a 256)   # macOS
 check() { if "$@"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: ${CHECK_NAME:-$*}"; fi; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -353,7 +354,7 @@ cat > "$HOME/.claude/settings.json" <<'EOF'
 EOF
 cp "$HOME/.claude/settings.json" "$TMP/claude-orig.json"
 "$ROOT/install.sh" --claude --glyphs nerd --bar capsule >/dev/null
-sum1=$(cd "$HOME" && find . -type f -exec sha256sum {} + | sort)
+sum1=$(cd "$HOME" && find . -type f -exec "${SHA[@]}" {} + | sort)
 CHECK_NAME="claude: statusLine points to agentline"
 check grep -q 'agentline/claude-statusline.sh' "$HOME/.claude/settings.json"
 CHECK_NAME="claude: other settings kept"
@@ -361,7 +362,7 @@ check test "$(jq -S 'del(.statusLine)' "$HOME/.claude/settings.json")" = "$(jq -
 CHECK_NAME="claude: config carries the chosen options"
 check grep -qx 'AGENTLINE_BAR=capsule' "$XDG_CONFIG_HOME/agentline/config"
 "$ROOT/install.sh" --claude --glyphs nerd --bar capsule > "$TMP/second.txt"
-sum2=$(cd "$HOME" && find . -type f -exec sha256sum {} + | sort)
+sum2=$(cd "$HOME" && find . -type f -exec "${SHA[@]}" {} + | sort)
 CHECK_NAME="claude: second install changes nothing"
 check test "$sum1" = "$sum2"
 CHECK_NAME="claude: second install reports unchanged"
@@ -374,7 +375,7 @@ jq --arg d "$XDG_DATA_HOME/agentline" '.statusLine.command = "bash \"" + $d + "/
     "$HOME/.claude/settings.json" > "$TMP/s.json" && cat "$TMP/s.json" > "$HOME/.claude/settings.json"
 "$ROOT/install.sh" --claude > /dev/null
 CHECK_NAME="claude: a bare bash statusLine is migrated, nothing else changes"
-check test "$(cd "$HOME" && find . -type f -exec sha256sum {} + | sort)" = "$sum2"
+check test "$(cd "$HOME" && find . -type f -exec "${SHA[@]}" {} + | sort)" = "$sum2"
 "$ROOT/install.sh" --claude --uninstall >/dev/null
 CHECK_NAME="claude: uninstall restores the previous statusLine and settings"
 check test "$(jq -S . "$HOME/.claude/settings.json")" = "$(jq -S . "$TMP/claude-orig.json")"
@@ -410,9 +411,9 @@ CHECK_NAME="options: automodel off, never called"; check test ! -s "$TMP/am-new/
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes --automodel auto > /dev/null 2>&1
 out=$("${aenv[@]}" COLUMNS=160 bash "$AH/home/.local/share/agentline/claude-statusline.sh" <<<"$jev" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="options: automodel auto, its routing shown"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86' <<<"$out"
-sum1=$(cd "$AH/home" && find . -type f -exec sha256sum {} + | sort)
+sum1=$(cd "$AH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/am-second.log" 2>&1
-sum2=$(cd "$AH/home" && find . -type f -exec sha256sum {} + | sort)
+sum2=$(cd "$AH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 CHECK_NAME="over automodel: second install changes nothing"; check test "$sum1" = "$sum2"
 CHECK_NAME="over automodel: second install reports unchanged, no note"; check test "$(grep -v 'in your PATH' "$TMP/am-second.log" | grep -c '✓\|!')" -eq 0
 "${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/am-uninstall.log" 2>&1
@@ -451,11 +452,11 @@ CHECK_NAME="migration: route after effort"; check grep -qx 'AGENTLINE_SEGMENTS="
 CHECK_NAME="migration: version 2"; check test "$(grep -cx 'AGENTLINE_CONFIG_VERSION=2' "$aconf")" -eq 1
 CHECK_NAME="migration: the rest of the config kept"; check test "$(grep -c '^# old$\|^AGENTLINE_GLYPHS=unicode$\|^AGENTLINE_AUTO_UPDATE=0$' "$aconf")" -eq 3
 CHECK_NAME="migration: reported"; check grep -q 'route (automodel) added' "$TMP/migrate.log"
-c1=$(sha256sum < "$aconf")
+c1=$("${SHA[@]}" < "$aconf")
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/migrate2.log" 2>&1
-CHECK_NAME="migration: once only"; check test "$c1" = "$(sha256sum < "$aconf")"
+CHECK_NAME="migration: once only"; check test "$c1" = "$("${SHA[@]}" < "$aconf")"
 CHECK_NAME="migration: second run reports the config unchanged"; check grep -q 'config (.*(unchanged)' "$TMP/migrate2.log"
-sed -i 's/ route//' "$aconf"; "${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
+sed 's/ route//' "$aconf" > "$aconf.t" && mv "$aconf.t" "$aconf"; "${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
 CHECK_NAME="migration: route removed afterwards stays removed"; check grep -qx 'AGENTLINE_SEGMENTS="dir git session meta model effort ctx 5h 7d cache cost lines"' "$aconf"
 migrate 'AGENTLINE_SEGMENTS="dir model ctx"'
 CHECK_NAME="migration: route after the model without effort"; check grep -qx 'AGENTLINE_SEGMENTS="dir model route ctx"' "$aconf"
@@ -505,9 +506,9 @@ cp "$HOME/.codex/config.toml" "$TMP/codex-orig.toml"
 "$ROOT/install.sh" --codex >/dev/null
 CHECK_NAME="codex: config parses"; check toml_ok "$HOME/.codex/config.toml"
 CHECK_NAME="codex: status_line = preset"; check test "$(items "$HOME/.codex/config.toml")" = "$expected"
-c1=$(sha256sum < "$HOME/.codex/config.toml")
+c1=$("${SHA[@]}" < "$HOME/.codex/config.toml")
 "$ROOT/install.sh" --codex >/dev/null
-CHECK_NAME="codex: second install changes nothing"; check test "$c1" = "$(sha256sum < "$HOME/.codex/config.toml")"
+CHECK_NAME="codex: second install changes nothing"; check test "$c1" = "$("${SHA[@]}" < "$HOME/.codex/config.toml")"
 "$ROOT/install.sh" --codex --uninstall >/dev/null
 CHECK_NAME="codex: uninstall is byte-identical"; check cmp -s "$HOME/.codex/config.toml" "$TMP/codex-orig.toml"
 # Case 2: no [tui] table at all.
@@ -548,9 +549,9 @@ CHECK_NAME="assistant: automodel routing previewed on its row"; check grep -q 's
 CHECK_NAME="assistant: previews leave the last session alone"; check test "$(cat "$lp" 2>/dev/null)" = "$lp0"
 CHECK_NAME="bootstrap: agentline command"; check test -x "$BH/home/.local/bin/agentline"
 CHECK_NAME="bootstrap: statusLine set"; check grep -q 'agentline/claude-statusline.sh' "$BH/home/.claude/settings.json"
-sumA=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
+sumA=$(cd "$BH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 (cd "$TMP" && "${benv[@]}" AGENTLINE_SOURCE="$TMP/release.tar.gz" bash -s -- --yes < "$ROOT/install.sh" > /dev/null 2>&1)
-sumB=$(cd "$BH/home" && find . -type f -exec sha256sum {} + | sort)
+sumB=$(cd "$BH/home" && find . -type f -exec "${SHA[@]}" {} + | sort)
 CHECK_NAME="bootstrap: second curl | bash changes nothing"; check test "$sumA" = "$sumB"
 # Piped, there is no script file: a claude/statusline.sh in the current
 # directory (dotfiles) is not agentline's, the release is installed.

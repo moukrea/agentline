@@ -32,9 +32,12 @@ frame=${AGENTLINE_FRAME:-$now}
 # and the automodel lookup run at each render.
 CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"; CACHE_DIR="${CACHE_DIR%/}/agentline-$UID"
 cache_ours() { [ -d "$CACHE_DIR" ] && [ ! -L "$CACHE_DIR" ] && [ -O "$CACHE_DIR" ]; }
+# Windows (Git Bash, MSYS2, Cygwin): no Unix modes to rely on, but TMPDIR is
+# the user's own %TEMP%, so ownership is enough.
+WIN=0; case $OSTYPE in msys*|cygwin*) WIN=1 ;; esac
 # shellcheck disable=SC2174  # the parents, if any, get the umask's 700
 [ -e "$CACHE_DIR" ] || [ -L "$CACHE_DIR" ] || mkdir -p -m 1700 "$CACHE_DIR" 2>/dev/null
-if cache_ours && [ ! -k "$CACHE_DIR" ]; then
+if ((!WIN)) && cache_ours && [ ! -k "$CACHE_DIR" ]; then
     # Made by agentline before 0.5.0, with the umask's mode: made private once;
     # if others could write in it, it may hold their files: started afresh.
     cache_mode=$(ls -ld "$CACHE_DIR" 2>/dev/null)
@@ -43,7 +46,7 @@ if cache_ours && [ ! -k "$CACHE_DIR" ]; then
         *) rm -rf "$CACHE_DIR" 2>/dev/null && mkdir -m 1700 "$CACHE_DIR" 2>/dev/null ;;
     esac
 fi
-cache_ours && [ -k "$CACHE_DIR" ] || CACHE_DIR=""
+cache_ours && { ((WIN)) || [ -k "$CACHE_DIR" ]; } || CACHE_DIR=""
 mine() { # mine <file>: a cache file we may read (in the cache directory, ours, not a symlink)
     [ -n "$CACHE_DIR" ] && [ -n "$1" ] && [ -f "$1" ] && [ -O "$1" ] && [ ! -L "$1" ]
 }
@@ -430,6 +433,7 @@ ultra_fx() { # ultra_fx <text> → REPLY
 # ── Terminal width (Claude Code gives us no TTY: use an ancestor's) ───────
 term_width() {
     if [[ $COLUMNS -gt 0 ]] 2>/dev/null; then REPLY=$COLUMNS; return; fi
+    if ((WIN)); then win_width; return; fi
     local f="" tty="" pid=$PPID w t pp
     [ -n "$CACHE_DIR" ] && f="$CACHE_DIR/tty-${sid:-$PPID}"
     mine "$f" && read -r tty < "$f"
@@ -443,6 +447,20 @@ term_width() {
         [ -n "$tty" ] && [ -n "$f" ] && echo "$tty" > "$f"
     fi
     if [ -n "$tty" ]; then w=$(stty size < "/dev/$tty" 2>/dev/null); w=${w#* }; fi
+    [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
+}
+# Windows: no ps/stty to reach the terminal. The console Claude Code runs in
+# is asked by PowerShell, in the background (it takes a few hundred ms), and
+# the answer is cached for 5 s; until the first one, 120 columns.
+win_width() {
+    local f="" at=0 w=0
+    [ -n "$CACHE_DIR" ] && f="$CACHE_DIR/cols"
+    mine "$f" && read -r at w < "$f"
+    if [ -n "$f" ] && ((now - ${at:-0} >= 5)); then
+        printf '%s %s\n' "$now" "${w:-0}" > "$f"   # one refresh at a time
+        (w=$(powershell.exe -NoProfile -NonInteractive -Command '[Console]::WindowWidth' 2>/dev/null | tr -dc 0-9)
+         [[ $w -gt 0 ]] 2>/dev/null && printf '%s %s\n' "$now" "$w" > "$f") </dev/null >/dev/null 2>&1 &
+    fi
     [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
 }
 term_width; tw=$((REPLY - 4))   # Claude Code pads the status line
