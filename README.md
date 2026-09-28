@@ -7,17 +7,6 @@ also shows how [automodel](#automodel) routes each prompt when you use it.
 
 ![agentline: bars, effort gauge, responsive layout, glyphs, live states and ultracode effects](docs/demo.gif)
 
-```
-~/projects/billing  ⎇ feat/billing-export ↑1 +2 !1 ?3 $1  “Refactor the billing module”       ◇ Concise  Opus 5.5 ●●○○○ medium
-context ██▋        26%  5h ██▋        27% ↻3h30  7d ████▍      44% ↻3d19h         cache 🔥 52m  $10.28 in 3h12  edits +663 −41
-```
-
-This is the real renderer's output for the sample session (`lib/sample.json`) in
-a 130-column terminal, with `unicode` glyphs (hence `smooth` bars and the `⎇` `↻`
-icons) and every other setting at its default (`two` lines, `dots` effort gauge).
-Plain text loses the colours and the bar tracks; with a Nerd Font you get icons
-and capsule bars, as in the demo.
-
 - **Line 1**: where you are (directory, git branch and status, session name) on the
   left; who answers (output style, model, reasoning effort, automodel's routing) on
   the right.

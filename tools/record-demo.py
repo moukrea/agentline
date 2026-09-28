@@ -29,7 +29,9 @@ TERM = {'dark': dict(bg=(17, 19, 20), fg=(217, 223, 211), muted=(127, 135, 125),
                      rule=(70, 76, 72), accent=(175, 135, 255), cursor=(217, 223, 211)),
         'light': dict(bg=(250, 250, 246), fg=(40, 40, 50), muted=(110, 110, 125), border=(205, 207, 200),
                       rule=(200, 202, 206), accent=(120, 80, 210), cursor=(40, 40, 50))}
-SIZE, MAXCOLS, ROWS = 15, 150, 9
+# 126 columns at 11 px: the full layout still fits, and the GIF is 880 px
+# wide, GitHub's README column, so it is shown 1:1, never scaled down.
+SIZE, MAXCOLS, ROWS = 11, 126, 9
 STYLES = ['capsule', 'smooth', 'blocks', 'line', 'segments', 'braille', 'ramp', 'dots', 'bars', 'squares', 'pie', 'none']
 
 ap = argparse.ArgumentParser()
@@ -89,14 +91,14 @@ CAPTION_BOLD = args.caption_bold_font or (CAPTION_BOLD if os.path.isfile(CAPTION
 CAP, CAPB = caption_font(CAPTION_FONT, False), caption_font(CAPTION_BOLD, True)
 CW = F['r'].getlength('M')
 LH = round(SIZE * 1.42)
-PAD, TOP = 22, 64
+PAD, TOP = 13, 64
 W = int(PAD * 2 + MAXCOLS * CW + 24)
 H = TOP + ROWS * LH + 24 + PAD
 
 # ── the real renderer ─────────────────────────────────────────────────────
 BASE = json.load(open(os.path.join(ROOT, 'lib', 'sample.json')))
-BASE.update(cwd='/home/you/projects/billing', session_id='agentline-demo')
-BASE['workspace'] = {'current_dir': '/home/you/projects/billing', 'project_dir': '/home/you/projects/billing'}
+BASE.update(cwd='/home/you/src/billing', session_id='agentline-demo', session_name='Billing refactor')
+BASE['workspace'] = {'current_dir': '/home/you/src/billing', 'project_dir': '/home/you/src/billing'}
 BASE['prompt_cache']['expires_at'] = NOW + BASE['prompt_cache']['expires_at']
 for r in BASE['rate_limits'].values():
     r['resets_at'] += NOW
@@ -138,7 +140,7 @@ def render(cols, scen, frame, opts):
     env = {k: v for k, v in os.environ.items()   # nothing from this machine's Claude Code or agentline
            if not k.startswith(('AGENTLINE_', 'CLAUDE_', 'AUTOMODEL_'))}
     env.update(HOME='/home/you', COLUMNS=str(cols), AGENTLINE_CONFIG='/dev/null', AGENTLINE_NOW=str(NOW),
-               AGENTLINE_FRAME=str(frame), AGENTLINE_DEMO_GIT='feat/billing-export 2 1 3 1 0 1',
+               AGENTLINE_FRAME=str(frame), AGENTLINE_DEMO_GIT='feat/export 2 1 3 1 0 1',
                XDG_RUNTIME_DIR=tempfile.gettempdir())
     env.update({'AGENTLINE_' + k: v for k, v in opts})
     out = subprocess.run(['bash', os.path.join(ROOT, 'claude', 'statusline.sh')], input=json.dumps(scenario(scen)),
