@@ -12,6 +12,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: ShellCheck
-        run: shellcheck -S warning install.sh claude/statusline.sh lib/wizard.sh bin/agentline tests/run.sh
+        run: shellcheck -S warning install.sh claude/statusline.sh lib/wizard.sh bin/agentline tests/run.sh tests/windows.sh
       - name: Tests
         run: tests/run.sh
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: bash 5 and jq (macOS ships bash 3.2)
+        run: brew install bash jq
+      - name: Tests
+        run: $(brew --prefix)/bin/bash tests/run.sh
+      - name: curl | bash from /bin/bash 3.2 re-runs under bash 5
+        run: |
+          export HOME=$(mktemp -d); mkdir -p "$HOME/.claude"
+          AGENTLINE_SOURCE="$GITHUB_WORKSPACE" /bin/bash -c "$(cat install.sh)" -- --yes --claude
+          jq -r .statusLine.command "$HOME/.claude/settings.json" | grep -q "^$(brew --prefix)/bin/bash "
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install.ps1 (the one-liner, from this checkout)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$HOME\.claude" | Out-Null
+          '{"statusLine":{"type":"command","command":"echo mine"}}' | Set-Content -NoNewline "$HOME\.claude\settings.json"
+          $env:AGENTLINE_SOURCE = "$env:GITHUB_WORKSPACE"
+          Get-Content -Raw install.ps1 | Invoke-Expression
+      - name: Smoke test
+        shell: bash
+        run: tests/windows.sh

@@ -13,7 +13,9 @@
 # overridable by the same AGENTLINE_* variables in the environment.
 # shellcheck disable=SC2154  # payload variables are assigned by the jq eval below
 set -f   # no pathname expansion anywhere: unquoted expansions only split words
-export LC_ALL=C.UTF-8
+# A UTF-8 locale, for ${#s} and ${s:i:1} to count characters: macOS has no
+# C.UTF-8 (bash then silently falls back to C, and cuts characters in half).
+case $OSTYPE in darwin*) export LC_ALL=en_US.UTF-8 ;; *) export LC_ALL=C.UTF-8 ;; esac
 umask 077   # what this script writes is for this user only
 
 input=$(cat)
@@ -32,9 +34,12 @@ frame=${AGENTLINE_FRAME:-$now}
 # and the automodel lookup run at each render.
 CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"; CACHE_DIR="${CACHE_DIR%/}/agentline-$UID"
 cache_ours() { [ -d "$CACHE_DIR" ] && [ ! -L "$CACHE_DIR" ] && [ -O "$CACHE_DIR" ]; }
+# Windows (Git Bash, MSYS2, Cygwin): no Unix modes to rely on, but TMPDIR is
+# the user's own %TEMP%, so ownership is enough.
+WIN=0; case $OSTYPE in msys*|cygwin*) WIN=1 ;; esac
 # shellcheck disable=SC2174  # the parents, if any, get the umask's 700
 [ -e "$CACHE_DIR" ] || [ -L "$CACHE_DIR" ] || mkdir -p -m 1700 "$CACHE_DIR" 2>/dev/null
-if cache_ours && [ ! -k "$CACHE_DIR" ]; then
+if ((!WIN)) && cache_ours && [ ! -k "$CACHE_DIR" ]; then
     # Made by agentline before 0.5.0, with the umask's mode: made private once;
     # if others could write in it, it may hold their files: started afresh.
     cache_mode=$(ls -ld "$CACHE_DIR" 2>/dev/null)
@@ -43,7 +48,7 @@ if cache_ours && [ ! -k "$CACHE_DIR" ]; then
         *) rm -rf "$CACHE_DIR" 2>/dev/null && mkdir -m 1700 "$CACHE_DIR" 2>/dev/null ;;
     esac
 fi
-cache_ours && [ -k "$CACHE_DIR" ] || CACHE_DIR=""
+cache_ours && { ((WIN)) || [ -k "$CACHE_DIR" ]; } || CACHE_DIR=""
 mine() { # mine <file>: a cache file we may read (in the cache directory, ours, not a symlink)
     [ -n "$CACHE_DIR" ] && [ -n "$1" ] && [ -f "$1" ] && [ -O "$1" ] && [ ! -L "$1" ]
 }
@@ -347,15 +352,15 @@ gauge() {
         ((i == 0)) && first=$REPLY
         if ((units >= 8)); then
             case $style in
-                line) out+="$REPLY━" ;; segments) out+="$REPLY■" ;; braille) out+="$REPLY⣿" ;;
-                *) out+="$REPLY█" ;;
+                line) out+="${REPLY}━" ;; segments) out+="${REPLY}■" ;; braille) out+="${REPLY}⣿" ;;
+                *) out+="${REPLY}█" ;;
             esac
             units=$((units - 8)); last=$REPLY
         elif ((units > 0)); then
             case $style in
                 smooth|capsule) [ "$col" = plain ] && out+="${EIGHTHS[units]}" || out+="$RAIL$REPLY${EIGHTHS[units]}$RST" ;;
-                line) ((units >= 4)) && out+="$REPLY╸" || out+="$TRACK─" ;;
-                segments) ((units >= 4)) && out+="$REPLY■" || out+="$TRACK□" ;;
+                line) ((units >= 4)) && out+="${REPLY}╸" || out+="${TRACK}─" ;;
+                segments) ((units >= 4)) && out+="${REPLY}■" || out+="${TRACK}□" ;;
                 braille) out+="$REPLY${BRAILLE[units]}" ;;
                 *) out+="$REPLY${SHADE[units]}" ;;
             esac
@@ -364,8 +369,8 @@ gauge() {
             case $style in line) out+="─" ;; segments) out+="□" ;; braille) out+="⣀" ;; blocks) out+="░" ;; *) out+=" " ;; esac
         else
             case $style in
-                smooth|capsule) out+="$RAIL $RST" ;; line) out+="$TRACK─" ;; segments) out+="$TRACK□" ;;
-                braille) out+="$TRACK⣀" ;; *) out+="$TRACK░" ;;
+                smooth|capsule) out+="$RAIL $RST" ;; line) out+="${TRACK}─" ;; segments) out+="${TRACK}□" ;;
+                braille) out+="${TRACK}⣀" ;; *) out+="${TRACK}░" ;;
             esac
         fi
     done
@@ -430,6 +435,7 @@ ultra_fx() { # ultra_fx <text> → REPLY
 # ── Terminal width (Claude Code gives us no TTY: use an ancestor's) ───────
 term_width() {
     if [[ $COLUMNS -gt 0 ]] 2>/dev/null; then REPLY=$COLUMNS; return; fi
+    if ((WIN)); then win_width; return; fi
     local f="" tty="" pid=$PPID w t pp
     [ -n "$CACHE_DIR" ] && f="$CACHE_DIR/tty-${sid:-$PPID}"
     mine "$f" && read -r tty < "$f"
@@ -443,6 +449,20 @@ term_width() {
         [ -n "$tty" ] && [ -n "$f" ] && echo "$tty" > "$f"
     fi
     if [ -n "$tty" ]; then w=$(stty size < "/dev/$tty" 2>/dev/null); w=${w#* }; fi
+    [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
+}
+# Windows: no ps/stty to reach the terminal. The console Claude Code runs in
+# is asked by PowerShell, in the background (it takes a few hundred ms), and
+# the answer is cached for 5 s; until the first one, 120 columns.
+win_width() {
+    local f="" at=0 w=0
+    [ -n "$CACHE_DIR" ] && f="$CACHE_DIR/cols"
+    mine "$f" && read -r at w < "$f"
+    if [ -n "$f" ] && ((now - ${at:-0} >= 5)); then
+        printf '%s %s\n' "$now" "${w:-0}" > "$f"   # one refresh at a time
+        (w=$(powershell.exe -NoProfile -NonInteractive -Command '[Console]::WindowWidth' 2>/dev/null | tr -dc 0-9)
+         [[ $w -gt 0 ]] 2>/dev/null && printf '%s %s\n' "$now" "$w" > "$f") </dev/null >/dev/null 2>&1 &
+    fi
     [[ $w -gt 0 ]] 2>/dev/null && REPLY=$w || REPLY=120
 }
 term_width; tw=$((REPLY - 4))   # Claude Code pads the status line
@@ -539,7 +559,7 @@ fi
 
 # Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
 rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
-    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp
+    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp day=""
     ((used < 0)) && return
     left=$((reset - now)); el=$((now - (reset - win)))
     if ((used >= 100)); then eta=0
@@ -550,14 +570,25 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
         fmt_dur "$eta"; tail=" ${RED}⚠ ${REPLY}${RST}"; tail_s="${RED}⚠${RST}"; pct_color "$used" 1
     else
         fmt_dur "$left"; tail=" ${LABEL}${I_RESET}${REPLY}${RST}"; tail_s=""; pct_color "$used"
+        # A reset on another day also says which one, in local time: "↻23h19
+        # (Tue 9:00)", so a reset tomorrow morning is not read as this morning.
+        local d t0 t1
+        printf -v t0 '%(%Y%m%d)T' "$now"; printf -v t1 '%(%Y%m%d)T' "$reset"
+        if [ "$t0" != "$t1" ]; then
+            printf -v d '%(%a %H:%M)T' "$reset"; d=${d/ 0/ }
+            day=" ${LABEL}(${d})${RST}"
+        fi
     fi
     pcol=$REPLY
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
     gauge "$BAR_STYLE" $((used * 10)) 10 heat
-    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
+    # Variant 0 with the day (the same as 1 without one: the step that gives
+    # up the day then changes nothing).
+    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}${day}"
+    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
     gauge "$COMPACT_STYLE" $((used * 10)) 5 heat; rp=${REPLY:+ $REPLY}
-    put "$name" 1 "${LABEL}${name}${RST}$rp ${ptx}${tail}"
-    put "$name" 2 "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
 }
 ((rl5_reset > 0)) && rate_seg 5h "$rl5" "$rl5_reset" 18000
 ((rl7_reset > 0)) && rate_seg 7d "$rl7" "$rl7_reset" 604800
@@ -745,7 +776,7 @@ compose() { # compose "<left segs>" "<right segs>" → REPLY, RW
 # What to give up first, least useful first, whatever the layout: each line
 # follows this order restricted to its own segments; a step naming several
 # segments advances them together.
-PRIORITY=(session lines route lines meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
+PRIORITY=(session lines route lines "5h 7d" meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
           model route "5h 7d" git 7d model)
 declare -A KNOWN=([dir]=1 [git]=1 [session]=1 [meta]=1 [model]=1 [route]=1 [ctx]=1 [5h]=1 [7d]=1 [cache]=1 [cost]=1 [lines]=1)
 fit_line() { # fit_line "<left segs>" "<right segs>" → REPLY, the most detailed line that fits

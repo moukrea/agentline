@@ -313,7 +313,7 @@ wizard() {
     for k in $ALL_SEGMENTS; do
         [[ " $AGENTLINE_SEGMENTS " == *" $k "* ]] && WIZ_VAL[$k]=1 || WIZ_VAL[$k]=0
     done
-    [ -n "$AGENTLINE_CODEX_ITEMS" ] || AGENTLINE_CODEX_ITEMS=$(grep -v '^[[:space:]]*\(#\|$\)' "$SRC/codex/preset" | tr '\n' ' ')
+    [ -n "$AGENTLINE_CODEX_ITEMS" ] || AGENTLINE_CODEX_ITEMS=$(grep -Ev '^[[:space:]]*(#|$)' "$SRC/codex/preset" | tr '\n' ' ')
     [ "${WIZ_VAL[CODEX_MIRROR]}" = 1 ] && AGENTLINE_CODEX_ITEMS=$(mirror_items "$AGENTLINE_SEGMENTS")
     for k in "${!WIZ_TYPE[@]}"; do
         [ "${WIZ_TYPE[k]}" = codex ] || continue
