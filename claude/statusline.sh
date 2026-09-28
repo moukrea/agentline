@@ -352,15 +352,15 @@ gauge() {
         ((i == 0)) && first=$REPLY
         if ((units >= 8)); then
             case $style in
-                line) out+="$REPLY━" ;; segments) out+="$REPLY■" ;; braille) out+="$REPLY⣿" ;;
-                *) out+="$REPLY█" ;;
+                line) out+="${REPLY}━" ;; segments) out+="${REPLY}■" ;; braille) out+="${REPLY}⣿" ;;
+                *) out+="${REPLY}█" ;;
             esac
             units=$((units - 8)); last=$REPLY
         elif ((units > 0)); then
             case $style in
                 smooth|capsule) [ "$col" = plain ] && out+="${EIGHTHS[units]}" || out+="$RAIL$REPLY${EIGHTHS[units]}$RST" ;;
-                line) ((units >= 4)) && out+="$REPLY╸" || out+="$TRACK─" ;;
-                segments) ((units >= 4)) && out+="$REPLY■" || out+="$TRACK□" ;;
+                line) ((units >= 4)) && out+="${REPLY}╸" || out+="${TRACK}─" ;;
+                segments) ((units >= 4)) && out+="${REPLY}■" || out+="${TRACK}□" ;;
                 braille) out+="$REPLY${BRAILLE[units]}" ;;
                 *) out+="$REPLY${SHADE[units]}" ;;
             esac
@@ -369,8 +369,8 @@ gauge() {
             case $style in line) out+="─" ;; segments) out+="□" ;; braille) out+="⣀" ;; blocks) out+="░" ;; *) out+=" " ;; esac
         else
             case $style in
-                smooth|capsule) out+="$RAIL $RST" ;; line) out+="$TRACK─" ;; segments) out+="$TRACK□" ;;
-                braille) out+="$TRACK⣀" ;; *) out+="$TRACK░" ;;
+                smooth|capsule) out+="$RAIL $RST" ;; line) out+="${TRACK}─" ;; segments) out+="${TRACK}□" ;;
+                braille) out+="${TRACK}⣀" ;; *) out+="${TRACK}░" ;;
             esac
         fi
     done
@@ -559,7 +559,7 @@ fi
 
 # Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
 rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
-    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp
+    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp day=""
     ((used < 0)) && return
     left=$((reset - now)); el=$((now - (reset - win)))
     if ((used >= 100)); then eta=0
@@ -570,14 +570,25 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
         fmt_dur "$eta"; tail=" ${RED}⚠ ${REPLY}${RST}"; tail_s="${RED}⚠${RST}"; pct_color "$used" 1
     else
         fmt_dur "$left"; tail=" ${LABEL}${I_RESET}${REPLY}${RST}"; tail_s=""; pct_color "$used"
+        # A reset on another day also says which one, in local time: "↻23h19
+        # (Tue 9:00)", so a reset tomorrow morning is not read as this morning.
+        local d t0 t1
+        printf -v t0 '%(%Y%m%d)T' "$now"; printf -v t1 '%(%Y%m%d)T' "$reset"
+        if [ "$t0" != "$t1" ]; then
+            printf -v d '%(%a %H:%M)T' "$reset"; d=${d/ 0/ }
+            day=" ${LABEL}(${d})${RST}"
+        fi
     fi
     pcol=$REPLY
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
     gauge "$BAR_STYLE" $((used * 10)) 10 heat
-    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
+    # Variant 0 with the day (the same as 1 without one: the step that gives
+    # up the day then changes nothing).
+    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}${day}"
+    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
     gauge "$COMPACT_STYLE" $((used * 10)) 5 heat; rp=${REPLY:+ $REPLY}
-    put "$name" 1 "${LABEL}${name}${RST}$rp ${ptx}${tail}"
-    put "$name" 2 "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
 }
 ((rl5_reset > 0)) && rate_seg 5h "$rl5" "$rl5_reset" 18000
 ((rl7_reset > 0)) && rate_seg 7d "$rl7" "$rl7_reset" 604800
@@ -765,7 +776,7 @@ compose() { # compose "<left segs>" "<right segs>" → REPLY, RW
 # What to give up first, least useful first, whatever the layout: each line
 # follows this order restricted to its own segments; a step naming several
 # segments advances them together.
-PRIORITY=(session lines route lines meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
+PRIORITY=(session lines route lines "5h 7d" meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
           model route "5h 7d" git 7d model)
 declare -A KNOWN=([dir]=1 [git]=1 [session]=1 [meta]=1 [model]=1 [route]=1 [ctx]=1 [5h]=1 [7d]=1 [cache]=1 [cost]=1 [lines]=1)
 fit_line() { # fit_line "<left segs>" "<right segs>" → REPLY, the most detailed line that fits

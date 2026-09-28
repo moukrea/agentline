@@ -26,6 +26,12 @@ for line in sys.stdin:
     s = re.sub(r"\x1b\[[0-9;]*m", "", line.rstrip("\n"))
     print(sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s))'; }
 
+# macOS's libc takes bytes >= 0x80 for letters in UTF-8 locales, so bash reads
+# "$REPLY█" as the variable REPLY█: a name right before a non-ASCII character
+# must be braced ("${REPLY}█").
+bad=$(LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$ROOT"/claude/statusline.sh "$ROOT"/install.sh "$ROOT"/lib/wizard.sh "$ROOT"/bin/agentline | grep -v '^\s*#')
+CHECK_NAME="no unbraced \$name before a non-ASCII character: $bad"; check test -z "$bad"
+
 # ── Rendering ───────────────────────────────────────────────────────────────
 echo "rendering"
 now=$(date +%s)
@@ -67,6 +73,11 @@ for cs in ramp capsule pie braille dots none; do
         done
     done
 done
+# A reset on another day says which one (local time); a reset today does not.
+rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940 | .rate_limits.seven_day.resets_at = $n + 3600' "$ROOT/tests/fixtures/session.json" \
+    | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="reset tomorrow: the day and time"; check grep -q '5h ██▋ *27% ↻23h19 (Tue 13:32)' <<<"$rs"
+CHECK_NAME="reset today: no day"; check grep -q '↻1h00  ' <<<"$rs"
 seg=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_SEGMENTS="dir ctx" COLUMNS=160 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="segments: hidden parts are gone"; check test "$(grep -c 'Opus\|5h\|cache' <<<"$seg")" -eq 0
 CHECK_NAME="segments: shown parts stay"; check grep -q 'context' <<<"$seg"

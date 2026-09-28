@@ -21,12 +21,6 @@ jobs:
       - uses: actions/checkout@v5
       - name: bash 5 and jq (macOS ships bash 3.2)
         run: brew install bash jq
-      - name: Debug locale (temporary)
-        run: |
-          B=$(brew --prefix)/bin/bash; $B --version | head -1; locale; locale -a | grep -i 'utf' | head -5
-          $B -c 'export LC_ALL=en_US.UTF-8; s="█▏x"; echo "len=${#s} sub=${s:1:1}"'
-          AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode AGENTLINE_BAR=smooth COLUMNS=120 $B claude/statusline.sh < tests/fixtures/session.json > /tmp/o.txt; head -c 700 /tmp/o.txt | xxd | head -30
-          python3 -c 'import sys; b=open("/tmp/o.txt","rb").read(); b.decode("utf-8")' && echo VALID
       - name: Tests
         run: $(brew --prefix)/bin/bash tests/run.sh
       - name: curl | bash from /bin/bash 3.2 re-runs under bash 5

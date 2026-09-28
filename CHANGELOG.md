@@ -13,8 +13,18 @@ All notable changes to agentline. Versions follow [Semantic Versioning](https://
 - CI on macOS (full suite with Homebrew's bash, and `curl | bash` from `/bin/bash`
   3.2) and Windows (install.ps1, render, reinstall, uninstall).
 
+### Added (continued)
+
+- A usage-limit reset on another day says which one, in local time:
+  `↻23h19 (Tue 9:00)`, so a reset tomorrow morning is not read as this morning.
+  Given up first when the terminal narrows.
+
 ### Fixed
 
+- **macOS**: bars and several glyphs came out garbled. macOS's libc takes bytes
+  above 0x80 for letters in UTF-8 locales, so bash read `"$REPLY█"` as a
+  variable named `REPLY█`; names are now braced (and a test keeps it so). Also a
+  UTF-8 locale that exists there (`en_US.UTF-8`; macOS has no `C.UTF-8`).
 - Warnings of newer ShellCheck releases (CI was red since 0.5.1).
 
 ## 0.5.2 - 2026-09-28
