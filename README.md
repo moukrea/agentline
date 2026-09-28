@@ -24,7 +24,7 @@ also shows how [automodel](#automodel) routes each prompt when you use it.
 | Effort | 5-step gauge coloured from `low` to `max`, dots `●●○○○` by default (the effort automodel picked, when it routes). **Ultracode** gets its own effect: by default Claude Code's violet with a sweeping highlight; else a drifting rainbow, or plain violet. |
 | Route | Only when automodel routes the session: how it decided. The confidence `0.86` (green, yellow, red), or `default`, `pinned`, `⚠ fallback`; `⚠ budget` over automodel's spending cap; `⚠ jev: <why>` when its router could not be asked; `↻ switched` for a moment after it changes its mind. See [the route part](#the-route-part). |
 | Context | Gradient bar and percentage; the percentage pulses above 85 %. |
-| 5h / 7d | Usage bar and percentage. `⚠ 1h20` in red when the current pace reaches the limit before it resets; otherwise the time until reset. |
+| 5h / 7d | Usage bar and percentage. `⚠ 1h20` in red when the current pace reaches the limit before it resets; otherwise the time until reset, plus its day and local time when it is not today (`↻23h19 (Tue 9:00)`). |
 | Prompt cache | `🔥 51m` while warm, `⏳ 4m` in the last sixth of its TTL, `🧊 cold` once expired. A cold cache makes the next turn re-read the whole context. |
 | Cost, duration, edits | From Claude Code's session counters. |
 
