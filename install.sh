@@ -24,6 +24,7 @@ case ${BASH_VERSION:-} in
             [ -n "$s" ] && exec "$b" "$s" "$@"
             # bash -c "$(curl …)": the script is that string, not stdin.
             [ -n "${BASH_EXECUTION_STRING:-}" ] && exec "$b" -c "$BASH_EXECUTION_STRING" "$0" "$@"
+            # shellcheck disable=SC2093  # piped: bash 5 reads the rest of stdin
             exec "$b" -s -- "$@"
         done
         echo "agentline needs bash 5 (macOS: brew install bash jq)" >&2; exit 1 ;;
@@ -79,6 +80,7 @@ with_route() { # with_route "<segments>" → REPLY
 # automodel, found like the renderer finds it: its UserPromptSubmit hook
 # "<exe> --config <cfg> hook decide" in settings.json. → AM_CMD ("<exe> --config
 # <cfg>", as written there), AM_EXE, AM_CFG; returns 1 when absent.
+# shellcheck disable=SC2120  # the argument is optional
 am_find() { # am_find [settings.json]
     local f=${1:-$CLAUDE_SETTINGS} cmd="" v val
     AM_CMD="" AM_EXE="" AM_CFG=""
@@ -325,7 +327,7 @@ statusline_cmd() { # statusline_cmd "<current command>" → REPLY
     if ((WIN)); then
         # Windows: C:/… paths, which Git Bash and cmd.exe both run, and Git's
         # bin/bash.exe, which sets up the PATH (jq, git) whoever starts it.
-        b="$(cygpath -m /)/bin/bash.exe"; [ -x "$b" ] || b=$(cygpath -m "$BASH")
+        b="$(cygpath -m /)"; b="${b%/}/bin/bash.exe"; [ -x "$b" ] || b=$(cygpath -m "$BASH")
         REPLY="\"$b\" \"$(cygpath -m "$DATA/claude-statusline.sh")\""
         return
     fi
