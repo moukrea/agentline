@@ -13,7 +13,9 @@
 # overridable by the same AGENTLINE_* variables in the environment.
 # shellcheck disable=SC2154  # payload variables are assigned by the jq eval below
 set -f   # no pathname expansion anywhere: unquoted expansions only split words
-export LC_ALL=C.UTF-8
+# A UTF-8 locale, for ${#s} and ${s:i:1} to count characters: macOS has no
+# C.UTF-8 (bash then silently falls back to C, and cuts characters in half).
+case $OSTYPE in darwin*) export LC_ALL=en_US.UTF-8 ;; *) export LC_ALL=C.UTF-8 ;; esac
 umask 077   # what this script writes is for this user only
 
 input=$(cat)
