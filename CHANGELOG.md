@@ -2,6 +2,14 @@
 
 All notable changes to agentline. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.5.1 - 2026-09-28
+
+### Added
+
+- The route part says when automodel's effort differs from the one Claude Code
+  shows (its spinner, `/effort`): `real effort: low (Claude Code shows xhigh)`,
+  compact `(CC: xhigh)`. From automodel's `claude_effort` (automodel 0.9.0).
+
 ## 0.5.0 - 2026-09-27
 
 ### Added
