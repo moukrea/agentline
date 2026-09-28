@@ -29,9 +29,10 @@ TERM = {'dark': dict(bg=(17, 19, 20), fg=(217, 223, 211), muted=(127, 135, 125),
                      rule=(70, 76, 72), accent=(175, 135, 255), cursor=(217, 223, 211)),
         'light': dict(bg=(250, 250, 246), fg=(40, 40, 50), muted=(110, 110, 125), border=(205, 207, 200),
                       rule=(200, 202, 206), accent=(120, 80, 210), cursor=(40, 40, 50))}
-# 126 columns at 11 px: the full layout still fits, and the GIF is 880 px
-# wide, GitHub's README column, so it is shown 1:1, never scaled down.
-SIZE, MAXCOLS, ROWS = 11, 126, 9
+# 122 columns at 10.5 px: the full layout still fits (with the sample's
+# smaller counters below), and the GIF stays under 800 px, narrower than
+# GitHub's README column (~830 px), so it is shown 1:1, never scaled down.
+SIZE, MAXCOLS, ROWS = 10.5, 122, 9
 STYLES = ['capsule', 'smooth', 'blocks', 'line', 'segments', 'braille', 'ramp', 'dots', 'bars', 'squares', 'pie', 'none']
 
 ap = argparse.ArgumentParser()
@@ -91,14 +92,15 @@ CAPTION_BOLD = args.caption_bold_font or (CAPTION_BOLD if os.path.isfile(CAPTION
 CAP, CAPB = caption_font(CAPTION_FONT, False), caption_font(CAPTION_BOLD, True)
 CW = F['r'].getlength('M')
 LH = round(SIZE * 1.42)
-PAD, TOP = 13, 64
-W = int(PAD * 2 + MAXCOLS * CW + 24)
+PAD, TOP = 4, 64
+W = int(PAD * 2 + MAXCOLS * CW + 16) + 1
 H = TOP + ROWS * LH + 24 + PAD
 
 # ── the real renderer ─────────────────────────────────────────────────────
 BASE = json.load(open(os.path.join(ROOT, 'lib', 'sample.json')))
 BASE.update(cwd='/home/you/src/billing', session_id='agentline-demo', session_name='Billing refactor')
 BASE['workspace'] = {'current_dir': '/home/you/src/billing', 'project_dir': '/home/you/src/billing'}
+BASE['cost'].update(total_cost_usd=4.1, total_duration_ms=2520000, total_lines_added=63, total_lines_removed=4)
 BASE['prompt_cache']['expires_at'] = NOW + BASE['prompt_cache']['expires_at']
 for r in BASE['rate_limits'].values():
     r['resets_at'] += NOW
@@ -241,9 +243,9 @@ def screen(cols=MAXCOLS, scen='session', frame=0, caption=('', '', ''), **opts):
         d.text((x, 24), value, font=CAPB, fill=CLAY); x += CAPB.getlength(value)
     if note: d.text((x + 14, 24), note, font=CAP, fill=MUTED)
     # Terminal window, as wide as the simulated terminal.
-    tw = cols * CW + 24
+    tw = cols * CW + 16
     d.rounded_rectangle([PAD, TOP, PAD + tw, TOP + ROWS * LH + 24], radius=10, fill=t['bg'], outline=t['border'])
-    x0, y = PAD + 12, TOP + 12
+    x0, y = PAD + 8, TOP + 12
     sgr = lambda c: '\x1b[38;2;%d;%d;%dm' % c
     rule = sgr(t['rule']) + '─' * cols
     for line in [f'{sgr(t["fg"])}⏺\x1b[m Exported the billing report as CSV and updated its tests.', '',
