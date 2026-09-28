@@ -45,12 +45,25 @@ animations) is cheap. automodel, when present, is asked while the rest renders.
 
 ## Install
 
-Needs bash 5, `jq`, `git` and `curl`, on Linux or macOS (there: `brew install bash
-jq`); see [Requirements](#requirements-and-compatibility).
+**Linux, macOS** (needs bash 5, `jq`, `git` and `curl`; on macOS first
+`brew install bash jq`):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash
 ```
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/moukrea/agentline/main/install.ps1 | iex
+```
+
+It finds Git Bash, which Claude Code on Windows needs anyway (or installs Git for
+Windows with `winget`), installs `jq` with `winget` if it is missing, then runs the
+same installer in Git Bash, with the defaults: change them with
+`agentline configure` from Git Bash. Installer options go in
+`$env:AGENTLINE_ARGS` (e.g. `'--glyphs unicode'`). See
+[Requirements](#requirements-and-compatibility).
 
 This installs the latest release, never unreleased code from `main`.
 
@@ -141,12 +154,16 @@ off with `agentline install --auto-update off`, or update by hand with
 
 ## Requirements and compatibility
 
-- **Linux or macOS**, with **bash 5**, `jq`, `git` and `curl` (and `ps`, `stty`
+- **Linux, macOS or Windows**, with **bash 5**, `jq`, `git` and `curl` (and `ps`, `stty`
   for the terminal's width). macOS ships bash 3.2: `brew install bash jq`. The
   installer runs itself with the first bash 5 it finds (Homebrew, Linuxbrew,
   MacPorts, then your `PATH`) and writes that bash's absolute path in Claude
   Code's `statusLine`, so an older bash first in Claude Code's `PATH` is never
-  used. Python 3.11, when present, checks that an edited Codex `config.toml` still
+  used. **Windows**: Git Bash (Git for Windows, bash 5) and `jq`, which
+  `install.ps1` installs; the status line runs Git's `bash.exe` by its `C:/`
+  path, and the terminal's width comes from the console (PowerShell, in the
+  background, cached 5 s; 120 columns until the first answer). CI runs the full
+  suite on Linux and macOS, and an install-and-render test on Windows. Python 3.11, when present, checks that an edited Codex `config.toml` still
   parses.
 - **Claude Code**: agentline reads these fields of the JSON Claude Code sends to
   status lines: `cwd` and `workspace` (directory, project, worktree), `model`,

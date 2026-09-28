@@ -2,6 +2,21 @@
 
 All notable changes to agentline. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.6.0 - 2026-09-28
+
+### Added
+
+- **Windows**: `irm https://raw.githubusercontent.com/moukrea/agentline/main/install.ps1 | iex`
+  finds Git Bash (or installs Git for Windows with winget), installs jq if needed and
+  runs the installer there. The status line runs Git's `bash.exe` by its `C:/` path;
+  the terminal's width comes from the console, asked in the background.
+- CI on macOS (full suite with Homebrew's bash, and `curl | bash` from `/bin/bash`
+  3.2) and Windows (install.ps1, render, reinstall, uninstall).
+
+### Fixed
+
+- Warnings of newer ShellCheck releases (CI was red since 0.5.1).
+
 ## 0.5.2 - 2026-09-28
 
 ### Changed
