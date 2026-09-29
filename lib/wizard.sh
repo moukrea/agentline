@@ -192,7 +192,7 @@ wiz_draw() {
     top=$((pos - avail / 2)); ((top > ${#vis[@]} - avail)) && top=$((${#vis[@]} - avail)); ((top < 0)) && top=0
     for ((j = top; j < top + avail && j < ${#vis[@]}; j++)); do
         row=${vis[j]}
-        sel=" "; ((row == WIZ_CUR)) && sel=$'\e[36m›\e[0m'
+        sel=" "; ((row == WIZ_CUR)) && sel=$'\e[36m❯\e[0m'
         case ${WIZ_TYPE[row]} in
             header) line=$'\e[1;2m  '"${WIZ_ROWS[row]}"$'\e[0m' ;;
             note)   [ "${WIZ_OPTS[row]}" = dim ] && k=$'\e[2m' || k=$'\e[33m'
@@ -201,14 +201,21 @@ wiz_draw() {
                     [ "${WIZ_VAL[CODEX_OPEN]}" = 1 ] && k="▾" || k="▸"
                     line=" $sel $k ${WIZ_ROWS[row]}  "$'\e[2m'"${val// / · }"$'\e[0m' ;;
             choice) label_of "${WIZ_VAL[${WIZ_KEY[row]}]}" "${WIZ_KEY[row]}"
-                    printf -v line ' %s %-26s \e[36m‹\e[0m %s \e[36m›\e[0m' "$sel" "${WIZ_ROWS[row]}" "$REPLY" ;;
+                    # ‹ › only on the current row: that is where ←→ act.
+                    if ((row == WIZ_CUR)); then printf -v line ' %s %-26s \e[36m‹\e[0m %s \e[36m›\e[0m' "$sel" "${WIZ_ROWS[row]}" "$REPLY"
+                    else printf -v line ' %s %-26s   %s' "$sel" "${WIZ_ROWS[row]}" "$REPLY"; fi ;;
             toggle|codex)
                     val=${WIZ_KEY[row]}; [ "${WIZ_TYPE[row]}" = codex ] && val="codex:$val"
                     [ "${WIZ_VAL[$val]}" = 1 ] && val=$'\e[32m■\e[0m' || val=$'\e[2m□\e[0m'
                     line=" $sel $val ${WIZ_ROWS[row]}" ;;
         esac
-        ((row == WIZ_CUR)) && line=$'\e[1m'"$line"
-        buf+="$line"$'\e[0m\e[K\n'
+        # The current row: bold on a highlight bar the width of the screen
+        # (re-applied after each reset inside the line; \e[K paints the rest).
+        if ((row == WIZ_CUR)); then
+            local hl=$'\e[1;48;2;58;55;50m'
+            line="$hl${line//$'\e[0m'/$'\e[0m'$hl}"
+        fi
+        buf+="$line"$'\e[K\e[0m\n'
     done
     printf '%s\e[J' "$buf"
 }
