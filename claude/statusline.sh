@@ -581,11 +581,11 @@ rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
     fi
     pcol=$REPLY
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
-    gauge "$BAR_STYLE" $((used * 10)) 10 heat
+    gauge "$BAR_STYLE" $((used * 10)) 10 heat; rp=${REPLY:+ $REPLY}   # put() reuses REPLY
     # Variant 0 with the day (the same as 1 without one: the step that gives
     # up the day then changes nothing).
-    put "$name" 0 "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}${day}"
-    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}${REPLY:+ $REPLY} ${ptx}${tail}"
+    put "$name" 0 "${LABEL}${name}${RST}$rp ${ptx}${tail}${day}"
+    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
     gauge "$COMPACT_STYLE" $((used * 10)) 5 heat; rp=${REPLY:+ $REPLY}
     put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
     put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"

@@ -78,6 +78,10 @@ rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940 | 
     | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="reset tomorrow: the day and time"; check grep -q '5h ██▋ *27% ↻23h19 (Tue 13:32)' <<<"$rs"
 CHECK_NAME="reset today: no day"; check grep -q '↻1h00  ' <<<"$rs"
+# Narrower: the day goes first, the bar stays a bar.
+rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940' "$ROOT/tests/fixtures/session.json" \
+    | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=112 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="reset day given up: 5h keeps its bar ($rs)"; check grep -Eq '5h ██▋ +27% ↻23h19  ' <<<"$rs"
 seg=$(AGENTLINE_CONFIG=/dev/null AGENTLINE_SEGMENTS="dir ctx" COLUMNS=160 bash "$ROOT/claude/statusline.sh" < "$ROOT/tests/fixtures/session.json" | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="segments: hidden parts are gone"; check test "$(grep -Ec 'Opus|5h|cache' <<<"$seg")" -eq 0
 CHECK_NAME="segments: shown parts stay"; check grep -q 'context' <<<"$seg"
