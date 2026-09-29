@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentline: a status line for Claude Code that tells you everything</title>
+<meta name="description" content="agentline is a status line for Claude Code, with a matching one for Codex: git state, context, 5-hour and 7-day limits, prompt cache, effort, cost, and automodel routing.">
+<meta property="og:title" content="agentline">
+<meta property="og:description" content="A status line for Claude Code: everything that matters, at a glance.">
+<meta property="og:image" content="https://moukrea.github.io/agentline/assets/thumb-overview.jpg">
+<meta name="theme-color" content="#1a1918" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f3ec" media="(prefers-color-scheme: light)">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;1,8..60,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg" aria-hidden="true"><i class="g1"></i><i class="g2"></i></div>
+
+<header class="nav">
+  <a class="brand" href="#top">agentline</a>
+  <nav>
+    <a href="#videos">Video</a>
+    <a href="#why">Why</a>
+    <a href="#install">Install</a>
+    <a href="#docs">Docs</a>
+    <a class="gh" href="{{REPO}}" target="_blank" rel="noopener"><svg class="ghi" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="eyebrow">For Claude Code and Codex</div>
+    <h1 class="wordmark"><picture><source media="(prefers-color-scheme: light)" srcset="assets/wordmark-light.png"><img src="assets/wordmark-dark.png" alt="agentline" width="520"></picture></h1>
+    <p class="lede">Everything that matters, <i>at a glance.</i></p>
+    <p class="sub">A status line for Claude Code: where you are, what answers, and what is left. Git state, context,
+      the 5-hour and 7-day limits with when they reset, the prompt cache, cost and edits, and the model and effort
+      <a href="https://github.com/moukrea/automodel" target="_blank" rel="noopener">automodel</a> picks. A matching line for Codex.</p>
+    <div class="install" id="quick">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-os="unix">Linux · macOS</button>
+        <button role="tab" aria-selected="false" data-os="win">Windows</button>
+      </div>
+      <div class="cmd" data-os="unix"><span class="p">$</span><code>curl -fsSL https://raw.githubusercontent.com/moukrea/agentline/main/install.sh | bash</code><button class="copy" type="button">Copy</button></div>
+      <div class="cmd" data-os="win" hidden><span class="p">&gt;</span><code>irm https://raw.githubusercontent.com/moukrea/agentline/main/install.ps1 | iex</code><button class="copy" type="button">Copy</button></div>
+      <p class="then">The first install opens a setup assistant with a live preview. <a href="{{RELEASE_URL}}" target="_blank" rel="noopener" class="ver">{{VERSION}}</a></p>
+    </div>
+    <div class="picks" aria-hidden="true">
+      <span class="pill haiku"><span class="a">context</span> 26%</span>
+      <span class="pill e-max"><span class="a">5h</span> ⚠ 1h24</span>
+      <span class="pill ultra"><span class="a">cache</span> 52m</span>
+      <span class="pill e-xhigh"><span class="a">jev →</span> Opus 5.5 <span class="dots">●●●●○</span> xhigh</span>
+    </div>
+  </section>
+
+  <section id="videos" class="block">
+    <div class="eyebrow">See it work</div>
+    <h2>Two minutes, the real renderer.</h2>
+    <div class="videos">{{VIDEOS}}
+    </div>
+  </section>
+
+  <section id="why" class="block">
+    <div class="eyebrow">Why you want it</div>
+    <h2>Stop wondering. <i>Just look down.</i></h2>
+    <div class="grid">
+      <div class="it"><i class="n">1</i><div><b>Where you are</b><span>Directory, branch, staged, modified, untracked, ahead and stash, live.</span></div></div>
+      <div class="it"><i class="n">2</i><div><b>Your budgets, in bars</b><span>Context, 5-hour and 7-day limits, and when each resets, with its day.</span></div></div>
+      <div class="it"><i class="n">3</i><div><b>A warning before the wall</b><span><code>⚠ 1h24</code> when, at this pace, you would hit a limit before it resets.</span></div></div>
+      <div class="it"><i class="n">4</i><div><b>The prompt cache</b><span>Warm, expiring or cold: a cold cache re-reads the whole context.</span></div></div>
+      <div class="it"><i class="n">5</i><div><b>Effort at a glance</b><span>A gauge for the reasoning effort; ultracode gets its own effect.</span></div></div>
+      <div class="it"><i class="n">6</i><div><b>With automodel</b><span>The model and effort it picked, its confidence, each change, the effort really used.</span></div></div>
+      <div class="it"><i class="n">7</i><div><b>Your look</b><span>Twelve gauge styles, Nerd or Unicode, dark or light, one line, two, or your own layout.</span></div></div>
+      <div class="it"><i class="n">8</i><div><b>Fast, and everywhere</b><span>About 40 ms per render; Linux, macOS and Windows; a matching line for Codex.</span></div></div>
+    </div>
+  </section>
+
+  <section id="how" class="block">
+    <div class="eyebrow">How it works</div>
+    <h2>One script, every second.</h2>
+    <div class="flow">
+      <div class="node">Claude Code<small>session JSON</small></div>
+      <div class="wire"><i></i></div>
+      <div class="node am">agentline<small>bash, ~40 ms</small>
+        <div class="jev">automodel<small>its routing, if installed</small></div>
+      </div>
+      <div class="wire"><i></i></div>
+      <div class="node">Your status line</div>
+    </div>
+    <p class="cap">Claude Code pipes each session’s state to the script. <b>It fits the line to your terminal’s width.</b></p>
+  </section>
+
+  <section id="docs" class="block docs">
+    <div class="eyebrow">Documentation</div>
+    <h2>Everything, in one place.</h2>
+    <div class="doc-layout">
+      <aside class="toc"><div class="toc-in">{{TOC}}</div></aside>
+      <article class="md">{{DOCS}}</article>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div><span class="brand">agentline</span> <a href="{{RELEASE_URL}}" target="_blank" rel="noopener">{{VERSION}}</a></div>
+  <div class="links"><a class="gh" href="{{REPO}}" target="_blank" rel="noopener"><svg class="ghi" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a><a href="{{REPO}}/releases" target="_blank" rel="noopener">Releases</a><a href="{{REPO}}/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a><a href="{{REPO}}/blob/main/LICENSE" target="_blank" rel="noopener">MIT license</a></div>
+  <div class="made">Made with <picture><source media="(prefers-color-scheme: light)" srcset="assets/claude-code-wordmark-light.svg"><img src="assets/claude-code-wordmark.svg" alt="Claude Code" height="16"></picture></div>
+</footer>
+<script src="site.js" defer></script>
+</body>
+</html>

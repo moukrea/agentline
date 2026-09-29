@@ -1,0 +1,10 @@
+{
+  "name": "agentline-site",
+  "private": true,
+  "type": "module",
+  "description": "Builds the agentline GitHub Pages site from README.md.",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "marked": "14.1.4"
+  }
+}

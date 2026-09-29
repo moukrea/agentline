@@ -1,9 +1,19 @@
-# agentline
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/wordmark-dark.png">
+    <img src="docs/media/wordmark-light.png" alt="agentline" width="440">
+  </picture>
+</h1>
 
 A status line for AI coding agents in the terminal: the full version for
 **Claude Code**, a matching built-in preset for **Codex**. Two lines by default,
 one line or your own arrangement if you prefer, for dark or light terminals. It
 also shows how [automodel](#automodel) routes each prompt when you use it.
+
+<p align="center">
+  <a href="https://youtu.be/J5fozI2P5Xw" title="agentline overview (2 min, YouTube)"><img src="docs/media/thumb-overview.jpg" width="600" alt="agentline overview, 2 minutes"></a>
+  <br><sub><a href="https://youtu.be/J5fozI2P5Xw">Overview (2 min)</a> · <a href="https://moukrea.github.io/agentline/">Documentation site</a></sub>
+</p>
 
 ![agentline: bars, effort gauge, responsive layout, glyphs, live states and ultracode effects](docs/demo.gif)
 
@@ -438,4 +448,6 @@ their answers in `AGENTLINE_AUTOMODEL_JSON`. Release tarballs leave out the demo
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Emeric Favarel (moukrea).
+
+The overview video's music: “Night Owl” by Broke For Free, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
