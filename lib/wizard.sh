@@ -245,10 +245,17 @@ wiz_change() { # cycle a choice or flip a toggle
             for i in "${!opts[@]}"; do [ "${opts[i]}" = "${WIZ_VAL[$key]}" ] && break; done
             WIZ_VAL[$key]=${opts[(i + d + n) % n]}
             # Nerd-only options follow the glyph set.
+            # Back to Nerd glyphs, capsules made smooth by Unicode come back.
             if [ "${WIZ_VAL[GLYPHS]}" = unicode ]; then
-                for k in BAR COMPACT_STYLE EFFORT_STYLE; do [ "${WIZ_VAL[$k]}" = capsule ] && WIZ_VAL[$k]=smooth; done
+                for k in BAR COMPACT_STYLE EFFORT_STYLE; do
+                    [ "${WIZ_VAL[$k]}" = capsule ] && WIZ_VAL[$k]=smooth WIZ_VAL[nerd:$k]=capsule
+                done
                 WIZ_VAL[BRANCH_ICON]=unicode WIZ_VAL[RESET_ICON]=unicode
             elif [ "$key" = GLYPHS ]; then
+                for k in BAR COMPACT_STYLE EFFORT_STYLE; do
+                    [ "${WIZ_VAL[nerd:$k]:-}" = capsule ] && [ "${WIZ_VAL[$k]}" = smooth ] && WIZ_VAL[$k]=capsule
+                    WIZ_VAL[nerd:$k]=""
+                done
                 WIZ_VAL[BRANCH_ICON]=octicon WIZ_VAL[RESET_ICON]=octicon
             fi ;;
     esac

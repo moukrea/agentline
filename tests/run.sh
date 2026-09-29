@@ -11,6 +11,7 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/home/.config" XDG_DATA_HOME="$TMP/home/.local/share" XDG_RUNTIME_DIR="$TMP/run"
 unset CLAUDE_CONFIG_DIR CODEX_HOME
 export AGENTLINE_ASSUME_NERD=1   # font detection is tested on its own below
+export AGENTLINE_AUTO_UPDATE=0     # the real background update from GitHub raced the checks
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR"
 
 # A git repository with staged, modified and untracked files for the fixtures.
@@ -557,6 +558,12 @@ for kv in GLYPHS=nerd BAR=smooth COMPACT_STYLE=none EFFORT_STYLE=ramp ULTRA_EFFE
           BRANCH_ICON=octicon RESET_ICON=mdi-history AUTO_UPDATE=0 THEME=light LAYOUT=one AUTOMODEL=off CONFIG_VERSION=2; do
     CHECK_NAME="assistant: $kv saved"; check grep -qx "AGENTLINE_$kv" "$conf"
 done
+# Unicode glyphs and back: the capsule bars come back too.
+GH="$TMP/glyphs"; mkdir -p "$GH/home/.claude"
+printf '%s' "$D" "$R" "$R" $'\n' > "$TMP/answers-g"
+(cd "$TMP" && env HOME="$GH/home" XDG_CONFIG_HOME="$GH/home/.config" XDG_DATA_HOME="$GH/home/.local/share" XDG_RUNTIME_DIR="$TMP/run" \
+    AGENTLINE_TTY="$TMP/answers-g" COLUMNS=100 "$ROOT/install.sh" --claude > /dev/null 2>&1)
+CHECK_NAME="assistant: Unicode and back to Nerd keeps capsule bars"; check grep -qx 'AGENTLINE_BAR=capsule' "$GH/home/.config/agentline/config"
 CHECK_NAME="assistant: session name hidden"
 check grep -qx 'AGENTLINE_SEGMENTS="dir git meta model effort route ctx 5h 7d cache cost lines"' "$conf"
 CHECK_NAME="assistant: preview drawn"; check grep -q 'Preview' "$TMP/boot.log"
