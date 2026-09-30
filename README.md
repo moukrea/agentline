@@ -448,6 +448,6 @@ their answers in `AGENTLINE_AUTOMODEL_JSON`. Release tarballs leave out the demo
 
 ## License
 
-[MIT](LICENSE) © 2026 Emeric Favarel (moukrea).
+[MIT](LICENSE) © 2026 Emeric Commenge (moukrea).
 
 The overview video's music: “Night Owl” by Broke For Free, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
