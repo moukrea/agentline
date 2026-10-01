@@ -559,36 +559,53 @@ fi
 
 # Rate limits with burn-rate projection (⚠ = limit hit before reset at this pace).
 rate_seg() { # rate_seg <name> <used> <resets_at> <window-secs>
-    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_s pcol ptx rp day=""
+    local name=$1 used=$2 reset=$3 win=$4 left el eta=-1 tail tail_m tail_s pcol ptx rp day="" warn="" warn_m=""
     ((used < 0)) && return
+    # Claude Code sends the limits it got with its last request: once the reset
+    # time has passed, they are stale. The window has reset since: nothing used.
+    # The 7-day window rolls on by whole weeks; a new 5-hour window only starts
+    # with the next message, so it has no reset time yet.
+    if ((reset <= now)); then
+        used=0
+        if ((win == 604800)); then reset=$((reset + ((now - reset) / win + 1) * win)); else reset=0; fi
+    fi
     left=$((reset - now)); el=$((now - (reset - win)))
     if ((used >= 100)); then eta=0
-    elif ((used > 0 && el > win / 20)); then
+    elif ((reset > 0 && used > 0 && el > win / 20)); then
         local t=$(((100 - used) * el / used)); ((t < left)) && eta=$t
     fi
-    if ((eta >= 0)); then
-        fmt_dur "$eta"; tail=" ${RED}⚠ ${REPLY}${RST}"; tail_s="${RED}⚠${RST}"; pct_color "$used" 1
-    else
-        fmt_dur "$left"; tail=" ${LABEL}${I_RESET}${REPLY}${RST}"; tail_s=""; pct_color "$used"
+    # The reset time is always shown. When, at the pace so far, the limit is
+    # reached before it, a red warning follows: "↻3d18h ⚠ full in 3d4h".
+    tail="" tail_m="" tail_s=""
+    if ((reset > 0)); then
+        fmt_dur "$left"; tail=" ${LABEL}${I_RESET}${REPLY}${RST}"; tail_m=$tail
         # A reset on another day also says which one, in local time: "↻23h19
         # (Tue 9:00)", so a reset tomorrow morning is not read as this morning.
         local d t0 t1
         printf -v t0 '%(%Y%m%d)T' "$now"; printf -v t1 '%(%Y%m%d)T' "$reset"
-        if ((left > 0)) && [ "$t0" != "$t1" ]; then
+        if [ "$t0" != "$t1" ]; then
             printf -v d '%(%a %H:%M)T' "$reset"; d=${d/ 0/ }
             day=" ${LABEL}(${d})${RST}"
         fi
+    fi
+    if ((eta >= 0)); then
+        fmt_dur "$eta"
+        if ((eta == 0)); then warn=" ${RED}⚠ full${RST}" warn_m=" ${RED}⚠${RST}"
+        else warn=" ${RED}⚠ full in ${REPLY}${RST}" warn_m=" ${RED}⚠${REPLY}${RST}"; fi
+        tail_s="${RED}⚠${RST}"; pct_color "$used" 1
+    else
+        pct_color "$used"
     fi
     pcol=$REPLY
     printf -v ptx '%s%d%%%s' "$pcol" "$used" "$RST"
     gauge "$BAR_STYLE" $((used * 10)) 10 heat; rp=${REPLY:+ $REPLY}   # put() reuses REPLY
     # Variant 0 with the day (the same as 1 without one: the step that gives
     # up the day then changes nothing).
-    put "$name" 0 "${LABEL}${name}${RST}$rp ${ptx}${tail}${day}"
-    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
+    put "$name" 0 "${LABEL}${name}${RST}$rp ${ptx}${tail}${day}${warn}"
+    put "$name" "${NV[$name]:-0}" "${LABEL}${name}${RST}$rp ${ptx}${tail}${warn}"
     gauge "$COMPACT_STYLE" $((used * 10)) 5 heat; rp=${REPLY:+ $REPLY}
-    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail}"
-    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_s}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_m}${warn_m}"
+    put "$name" "${NV[$name]}" "${LABEL}${name}${RST}$rp ${ptx}${tail_s:+ $tail_s}"
 }
 ((rl5_reset > 0)) && rate_seg 5h "$rl5" "$rl5_reset" 18000
 ((rl7_reset > 0)) && rate_seg 7d "$rl7" "$rl7_reset" 604800
