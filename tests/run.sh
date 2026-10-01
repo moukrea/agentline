@@ -79,6 +79,16 @@ rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940 | 
     | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
 CHECK_NAME="reset tomorrow: the day and time"; check grep -q '5h ██▋ *27% ↻23h19 (Tue 13:32)' <<<"$rs"
 CHECK_NAME="reset today: no day"; check grep -q '↻1h00  ' <<<"$rs"
+# Near a limit: the reset time stays, the warning comes after it.
+rs=$(jq --argjson n 1790000000 '.rate_limits = {five_hour: {used_percentage: 64, resets_at: ($n + 9000)}, seven_day: {used_percentage: 81, resets_at: ($n + 200000)}}' "$ROOT/tests/fixtures/session.json" \
+    | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="pace warning: the reset is still shown ($rs)"; check grep -q '64% ↻2h30 ⚠ full in 1h24' <<<"$rs"
+CHECK_NAME="pace warning, 7d: reset, day, then warning"; check grep -q '81% ↻2d7h (Wed 21:46) ⚠ full in 1d2h' <<<"$rs"
+# Past the reset time Claude Code's figures are stale: the window has reset.
+rs=$(jq --argjson n 1790000000 '.rate_limits = {five_hour: {used_percentage: 40, resets_at: ($n - 600)}, seven_day: {used_percentage: 51, resets_at: ($n - 3600)}}' "$ROOT/tests/fixtures/session.json" \
+    | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=200 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="reset passed, 5h: nothing used, no reset time yet ($rs)"; check grep -Eq '5h +0%  7d' <<<"$rs"
+CHECK_NAME="reset passed, 7d: rolls on to next week"; check grep -q '7d            0% ↻6d23h (Mon 13:13)' <<<"$rs"
 # Narrower: the day goes first, the bar stays a bar.
 rs=$(jq --argjson n 1790000000 '.rate_limits.five_hour.resets_at = $n + 83940' "$ROOT/tests/fixtures/session.json" \
     | TZ=UTC AGENTLINE_NOW=1790000000 AGENTLINE_CONFIG=/dev/null AGENTLINE_GLYPHS=unicode COLUMNS=112 bash "$ROOT/claude/statusline.sh" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
