@@ -2,6 +2,15 @@
 
 All notable changes to agentline. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.6.7 - 2026-10-01
+
+### Fixed
+
+- In ultracode, Claude Code's effort struck in automodel's route part read
+  `xhigh` (what Claude Code's payload says): it reads `ultracode`.
+- The number after automodel's why is how likely that relation is (`why_p`,
+  automodel 0.19.2), not the effort's confidence; none after `asked`, `kept`…
+
 ## 0.6.6 - 2026-10-01
 
 ### Changed

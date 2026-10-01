@@ -309,11 +309,21 @@ out=$(labelled '.effort = "low" | .claude_effort = "xhigh"')
 CHECK_NAME="routed: the real effort when Claude Code shows another"; check grep -q 'jev → Opus 5.5 ●○○○○ low  xhigh 0.86$' <<<"$out"
 out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$(jq -c '.effort = "low" | .claude_effort = "xhigh"' <<<"$amx")" COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" | head -1)
 CHECK_NAME="routed: Claude Code's effort struck through, in red"; check grep -qF $'\e[9mxhigh' <<<"$out"
+head -n 1 "$TMP/effort-on.jsonl" > "$TMP/uc-am.jsonl"
+out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$(jq -c '.effort = "medium" | .claude_effort = "xhigh"' <<<"$amx")" COLUMNS=200 \
+    bash "$ROOT/claude/statusline.sh" <<<"$(jq --arg t "$TMP/uc-am.jsonl" '.transcript_path = $t | .session_id = "uc-am"' <<<"$jev")" | head -1 | sed 's/\x1b\[[0-9;]*m//g')
+CHECK_NAME="routed: Claude Code in ultracode, struck as ultracode"; check grep -q 'medium  ultracode 0.86$' <<<"$out"
 # automodel 0.19.0: the effort the last decision left, and why.
 out=$(labelled '.effort = "high" | .from = "xhigh" | .why = "aside" | .confidence = 0.59')
 CHECK_NAME="routed: the effort left and why"; check grep -q 'jev → Opus 5.5 ●●●○○ high  xhigh→high · aside 0.59$' <<<"$out"
 out=$(labelled '.why = "extend"')
 CHECK_NAME="routed: why, effort unchanged"; check grep -q 'xhigh  extend 0.86$' <<<"$out"
+out=$(labelled '.why = "aside" | .why_p = 0.79')
+CHECK_NAME="routed: the relation's own probability next to why"; check grep -q 'xhigh  aside 0.79$' <<<"$out"
+out=$(labelled '.why = "asked" | .why_p = 0')
+CHECK_NAME="routed: no number for a why that is no relation"; check grep -q 'xhigh  asked$' <<<"$out"
+out=$(labelled '.why = "new" | .why_p = 0')
+CHECK_NAME="routed: new, the confidence"; check grep -q 'xhigh  new 0.86$' <<<"$out"
 out=$(labelled '.state = "pinned" | .why = "pinned" | .from = "high"')
 CHECK_NAME="routed: pinned replaces why"; check grep -q 'xhigh  pinned$' <<<"$out"
 narrow() { # narrow <columns> → the first line, plain text
