@@ -336,13 +336,13 @@ prints its segment itself in that setup.
 
 | Shown | Meaning |
 |---|---|
-| `extend 0.86` | Jev, automodel's router, chose this model and effort with this confidence: green from 0.80, yellow from 0.60, red below. Before it, why: how the prompt relates to the last one (`continue`, `extend`, `inform`, `side question`, `aside`, `wrap up`, `new task`, `resume`), or `asked` (an effort asked in words), `new`, `go-ahead`, `kept`… Needs automodel 0.19.0 or later for the why. |
+| `extend 0.86` | Why automodel made its last decision, and how sure Jev, its router, is of it: green from 0.80, yellow from 0.60, red below. The why is how the prompt relates to the last one (`continue`, `extend`, `inform`, `side question`, `aside`, `wrap up`, `new task`, `resume`), with its probability, or `asked` (an effort asked in words), `go-ahead`, `kept`… with no number, or `new` with Jev's confidence in the effort. Needs automodel 0.19.2 or later; older ones show that confidence. |
 | `xhigh→high` | The effort the last decision left, when it changed it. |
 | `default` | Before the first decision of the session: automodel's default model and effort. |
 | `pinned` | Your `/effort` wins: routing pauses until you set it back to its default. |
 | `⚠ fallback` | Jev could not be asked; automodel used its default. |
 | `⚠ catalog` | automodel cannot load its model catalog (the model part keeps Claude Code's). |
-| ~~`xhigh`~~ | First, in red: the effort Claude Code displays (its spinner, `/effort`), struck through, when automodel runs another one this turn (the one in the model part). Per-turn effort over a fixed base keeps the prompt cache. Needs automodel 0.9.0 or later. |
+| ~~`xhigh`~~ | First, in red: the effort Claude Code displays (its spinner, `/effort`; `ultracode` in that mode), struck through, when automodel runs another one this turn (the one in the model part). Per-turn effort over a fixed base keeps the prompt cache. Needs automodel 0.9.0 or later. |
 | `⚠ budget` | The session or the day is over automodel's spending cap (yellow). |
 | `⚠ jev: <why>` | Why Jev could not be asked, such as a missing OpenRouter key. |
 | `↻ switched`, `↻ compact`, `↻ cold` | For a moment (automodel's `statusline_flash`, 30 s) after a new decision: a model switch, a compaction, a cold prompt cache. |

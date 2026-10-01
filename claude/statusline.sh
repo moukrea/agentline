@@ -111,7 +111,7 @@ declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 am_fd="" am_pid="" am_routed=0
 AM_JQ='def s: (. // "" | tostring | explode | map(select(. >= 32 and . != 127)) | implode);   # no control characters
   if type == "object" and .v == 1 and .routed == true then
-    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_budget=\(.budget | s) am_ceffort=\(.claude_effort | s) am_why=\(.why | s) am_from=\(.from | s) am_text=\(.text | s) am_routed=1"
+    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_budget=\(.budget | s) am_ceffort=\(.claude_effort | s) am_why=\(.why | s) am_whyp=\(.why_p | if type == "number" then [[., 0] | max, 1] | min * 100 | round else -1 end) am_from=\(.from | s) am_text=\(.text | s) am_routed=1"
   else "am_routed=0" end'
 am_discover() { # find automodel in settings.json and probe it → cache
     local cmd="" line fd pid rc=0 v val
@@ -644,22 +644,7 @@ if ((l_add || l_del)); then
     put lines 1 "$d"
 fi
 
-# ── Model and effort: routed by automodel, else Claude Code's own ─────────
-am_read
-ultra=0 arrow=""
-# automodel names its model by the catalog label ("Opus 5.5"). Its "model" is
-# the catalog key, never shown: without a label, the short name its text shows
-# ("jev → opus-5.5·xhigh 0.86"); without either, Claude Code's model and effort.
-am_name=${am_label:-}
-if ((am_routed)) && [ -z "$am_name" ] && [ -n "${am_model:-}" ] && [[ ${am_text:-} == *"→ "* ]]; then
-    am_name=${am_text#*→ }; am_name=${am_name%%·*}; am_name=${am_name%% *}
-fi
-if ((am_routed)) && [ -n "$am_name" ]; then
-    # "jev → Opus 5.5" with the effort (and mode) automodel chose.
-    model=$am_name effort=$am_effort
-    arrow="${LABEL}${am_alias:+$am_alias }→${RST} "
-    [ "$am_mode" = ultracode ] && ultra=1
-elif [ "$effort" = xhigh ]; then
+uc_on() { # Is Claude Code in ultracode? (its payload says effort "xhigh")
     # Ultracode: the payload reports it as effort "xhigh"; the real signal is in
     # the transcript (the "/effort ultracode" output, then ultra_effort_enter/exit
     # attachments) or the `ultracode: true` settings key. The transcript is
@@ -679,11 +664,33 @@ elif [ "$effort" = xhigh ]; then
             [ -n "$ucache" ] && echo "$size $st" > "$ucache"
         fi
     fi
-    if [ "$st" = on ]; then ultra=1
+    if [ "$st" = on ]; then return 0
     elif [ -z "$st" ] && grep -qs '"ultracode"[[:space:]]*:[[:space:]]*true' \
             "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "$project_dir/.claude/settings.json" "$project_dir/.claude/settings.local.json"; then
-        ultra=1
+        return 0
     fi
+    return 1
+}
+
+# ── Model and effort: routed by automodel, else Claude Code's own ─────────
+am_read
+ultra=0 arrow=""
+# automodel names its model by the catalog label ("Opus 5.5"). Its "model" is
+# the catalog key, never shown: without a label, the short name its text shows
+# ("jev → opus-5.5·xhigh 0.86"); without either, Claude Code's model and effort.
+am_name=${am_label:-}
+if ((am_routed)) && [ -z "$am_name" ] && [ -n "${am_model:-}" ] && [[ ${am_text:-} == *"→ "* ]]; then
+    am_name=${am_text#*→ }; am_name=${am_name%%·*}; am_name=${am_name%% *}
+fi
+if ((am_routed)) && [ -n "$am_name" ]; then
+    # "jev → Opus 5.5" with the effort (and mode) automodel chose.
+    model=$am_name effort=$am_effort
+    arrow="${LABEL}${am_alias:+$am_alias }→${RST} "
+    [ "$am_mode" = ultracode ] && ultra=1
+    # Claude Code's own effort, "xhigh" in its payload, is ultracode then.
+    [ "${am_ceffort:-}" = xhigh ] && uc_on && am_ceffort=ultracode
+elif [ "$effort" = xhigh ] && uc_on; then
+    ultra=1
 fi
 
 # ── Line 1 right: who (output style, agent, vim, model + effort, route) ───
@@ -747,9 +754,14 @@ if ((am_routed)); then
     ((${#am_issue} > 24)) && am_issue="${am_issue:0:23}…"
     case $am_state in
         routed)
-            ((am_conf < 0)) && am_conf=0; ((am_conf > 100)) && am_conf=100
+            # The number: how likely the relation named by why (automodel
+            # 0.19.2), else Jev's confidence in the effort (for new, no why, or
+            # older releases); none for a why that is no relation (asked, kept…).
+            if ((${am_whyp:--1} > 0)); then am_conf=$am_whyp
+            elif ((${am_whyp:--1} == 0)) && [ -n "${am_why:-}" ] && [ "$am_why" != new ]; then am_conf=-1; fi
             if ((am_conf >= 80)); then c=$GREEN; elif ((am_conf >= 60)); then c=$YELLOW; else c=$RED; fi
-            printf -v c '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; t=$c ;;
+            printf -v c '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; t=$c
+            ((am_conf < 0)) && t="" ;;
         default)  t="${LABEL}default${RST}" ;;
         pinned)   t="${CYAN}pinned${RST}" ;;
         fallback) t="${RED}⚠ fallback${RST}" r1+="${r1:+ }${RED}⚠${RST}" r2+="${r2:+ }${RED}⚠${RST}" warn=1 ;;
