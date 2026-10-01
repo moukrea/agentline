@@ -306,7 +306,23 @@ CHECK_NAME="routed: the label, not the catalog key"; check grep -q 'jev → Opus
 out=$(labelled '.budget = "over"')
 CHECK_NAME="routed: over automodel's spending cap"; check grep -q 'jev → Opus 5.5 ●●●●○ xhigh  0.86 ⚠ budget$' <<<"$out"
 out=$(labelled '.effort = "low" | .claude_effort = "xhigh"')
-CHECK_NAME="routed: the real effort when Claude Code shows another"; check grep -q 'jev → Opus 5.5 ●○○○○ low  not xhigh 0.86$' <<<"$out"
+CHECK_NAME="routed: the real effort when Claude Code shows another"; check grep -q 'jev → Opus 5.5 ●○○○○ low  xhigh 0.86$' <<<"$out"
+out=$(env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$(jq -c '.effort = "low" | .claude_effort = "xhigh"' <<<"$amx")" COLUMNS=200 bash "$ROOT/claude/statusline.sh" <<<"$jev" | head -1)
+CHECK_NAME="routed: Claude Code's effort struck through, in red"; check grep -qF $'\e[9mxhigh' <<<"$out"
+# automodel 0.19.0: the effort the last decision left, and why.
+out=$(labelled '.effort = "high" | .from = "xhigh" | .why = "aside" | .confidence = 0.59')
+CHECK_NAME="routed: the effort left and why"; check grep -q 'jev → Opus 5.5 ●●●○○ high  xhigh→high · aside 0.59$' <<<"$out"
+out=$(labelled '.why = "extend"')
+CHECK_NAME="routed: why, effort unchanged"; check grep -q 'xhigh  extend 0.86$' <<<"$out"
+out=$(labelled '.state = "pinned" | .why = "pinned" | .from = "high"')
+CHECK_NAME="routed: pinned replaces why"; check grep -q 'xhigh  pinned$' <<<"$out"
+narrow() { # narrow <columns> → the first line, plain text
+    env AGENTLINE_CONFIG=/dev/null AGENTLINE_AUTOMODEL_JSON="$(jq -c '.effort = "high" | .from = "xhigh" | .why = "aside" | .claude_effort = "xhigh" | .budget = "over"' <<<"$amx")" \
+        COLUMNS=$1 bash "$ROOT/claude/statusline.sh" <<<"$jev" | head -1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+narrowed=$(for c in $(seq 120 -2 30); do narrow "$c"; done)
+CHECK_NAME="routed, narrower: why kept, the effort left dropped"; check grep -q ' xhigh aside 0.86 ⚠$' <<<"$narrowed"
+CHECK_NAME="routed, narrower still: the confidence only"; check grep -q ' xhigh 0.86 ⚠$' <<<"$narrowed"
 out=$(labelled '.label = ""')
 CHECK_NAME="routed, no label: the name in its text"; check grep -q 'jev → opus-5.5 ●●●●○ xhigh  0.86$' <<<"$out"
 out=$(labelled '.label = "" | .effort = "" | .state = "default" | .text = "jev → opus-5.5 (default)"')
@@ -467,6 +483,34 @@ jq -n '{statusLine: {type: "command", command: "mine"}}' > "$asettings"
 "${aenv[@]}" "$ROOT/install.sh" --claude --yes > /dev/null 2>&1
 "${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > "$TMP/un.log" 2>&1
 CHECK_NAME="no automodel: uninstall restores your status line (got $(jq -c .statusLine "$asettings"); $(tr '\n' ' ' < "$TMP/un.log"))"; check test "$(jq -c .statusLine "$asettings")" = '{"type":"command","command":"mine"}'
+# jaunt's rich view: its wrapper is the statusLine and runs the one chained on
+# its "# jaunt-original:" line, which is what agentline reads and compares.
+jwrap="$AH/home/.local/share/jaunt/rich/jaunt-statusline"; mkdir -p "${jwrap%/*}"
+jaunt_wrap() { # jaunt_wrap <statusLine JSON or null> → wrapper and settings, as jaunt writes them
+    printf '#!/bin/sh\n# jaunt-original: %s\noriginal=x\nexec /bin/sh -c "$original"\n' "$(jq -c . <<<"$1")" > "$jwrap"
+    jq --arg c "$jwrap" '.statusLine = {type: "command", command: $c, refreshInterval: 1}' "$asettings" > "$TMP/s.json" && mv "$TMP/s.json" "$asettings"
+}
+with_am "$(jq -cn --arg c "$am_cmd statusline" '{type: "command", command: $c, refreshInterval: 1}')"
+cp "$asettings" "$TMP/am-orig.json"
+jaunt_wrap "$(jq -c .statusLine "$asettings")"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/jaunt1.log" 2>&1
+CHECK_NAME="behind jaunt: automodel's chained statusLine gives way to agentline's"; check grep -q 'agentline/claude-statusline.sh' "$asettings"
+CHECK_NAME="behind jaunt: the chained statusLine kept for --uninstall, not the wrapper"
+check test "$(jq -c . "$AH/home/.local/share/agentline/claude-previous-statusline.json")" = "$(jq -c .statusLine "$TMP/am-orig.json")"
+CHECK_NAME="behind jaunt: says jaunt chains it again"; check grep -q "jaunt's rich view chains it" "$TMP/jaunt1.log"
+jaunt_wrap "$(jq -c .statusLine "$asettings")"
+cp "$asettings" "$TMP/jaunt-wrapped.json"
+"${aenv[@]}" "$ROOT/install.sh" --claude --yes > "$TMP/jaunt2.log" 2>&1
+CHECK_NAME="behind jaunt: agentline chained, the wrapper stays"; check test "$(jq -S . "$asettings")" = "$(jq -S . "$TMP/jaunt-wrapped.json")"
+CHECK_NAME="behind jaunt: reported unchanged"; check grep -q "behind jaunt's wrapper" "$TMP/jaunt2.log"
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > /dev/null 2>&1
+CHECK_NAME="behind jaunt: uninstall sets the previous statusLine, for jaunt to chain"
+check test "$(jq -S . "$asettings")" = "$(jq -S . "$TMP/am-orig.json")"
+jaunt_wrap null
+cp "$asettings" "$TMP/jaunt-wrapped.json"
+"${aenv[@]}" "$ROOT/install.sh" --claude --uninstall > /dev/null 2>&1
+CHECK_NAME="behind jaunt: uninstall leaves the wrapper of another status line"; check test "$(jq -S . "$asettings")" = "$(jq -S . "$TMP/jaunt-wrapped.json")"
+rm -rf "$AH/home/.local/share/jaunt"
 # Configs from before 0.5.0: a saved list of parts gets "route", once.
 migrate() { # migrate "<segments line>" [install options...] → the config afterwards
     local line=$1; shift

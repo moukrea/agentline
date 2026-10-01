@@ -2,6 +2,21 @@
 
 All notable changes to agentline. Versions follow [Semantic Versioning](https://semver.org).
 
+## 0.6.6 - 2026-10-01
+
+### Changed
+
+- automodel's route part follows automodel 0.19.0: why it made its last decision
+  (`extend`, `aside`, `new task`…) before Jev's confidence, and the effort it left
+  when it changed it (`xhigh→high · aside 0.59`). The effort Claude Code displays,
+  when automodel runs another, is struck through in red (no more "not").
+
+### Fixed
+
+- Behind jaunt's rich view (its `jaunt-statusline` wrapper as `statusLine`), the
+  installer and updates read the status line the wrapper chains: agentline's is left
+  in place, and one of yours is kept for `--uninstall` instead of the wrapper.
+
 ## 0.6.0 - 2026-09-28
 
 ### Added

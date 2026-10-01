@@ -111,7 +111,7 @@ declare -A ON; for k in $SEGMENTS; do ON[$k]=1; done
 am_fd="" am_pid="" am_routed=0
 AM_JQ='def s: (. // "" | tostring | explode | map(select(. >= 32 and . != 127)) | implode);   # no control characters
   if type == "object" and .v == 1 and .routed == true then
-    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_budget=\(.budget | s) am_ceffort=\(.claude_effort | s) am_text=\(.text | s) am_routed=1"
+    @sh "am_alias=\(.alias | s) am_model=\(.model | s) am_label=\(.label | s) am_effort=\(.effort | s) am_mode=\(.mode | s) am_state=\(.state | s) am_conf=\(.confidence | if type == "number" then [[., 0] | max, 1] | min * 100 | round else 0 end) am_pin=\(.pin | s) am_issue=\(.issue | s) am_flash=\(.flash | s) am_budget=\(.budget | s) am_ceffort=\(.claude_effort | s) am_why=\(.why | s) am_from=\(.from | s) am_text=\(.text | s) am_routed=1"
   else "am_routed=0" end'
 am_discover() { # find automodel in settings.json and probe it → cache
     local cmd="" line fd pid rc=0 v val
@@ -727,40 +727,51 @@ else
     [ -n "$g" ] && put model 3 "${g# }"
 fi
 
-# Route: how automodel decided. 0 all text, 1 short, 2 warnings only.
+# Route: how automodel decided its last turn. 0 all text, 1 without the effort
+# it left, 2 the confidence only, 3 warnings only.
 if ((am_routed)); then
-    r0="" r1="" warn=""
+    r0="" r1="" r2="" warn="" why=""
     # Claude Code shows its own effort (spinner, /effort); automodel may run
     # another one per turn over that base to keep the cache. Right after the
-    # real effort: "not xhigh", the shown one struck through.
+    # real effort, the shown one struck through, in red.
     if [ -n "${am_ceffort:-}" ] && [ -n "$am_effort" ]; then
-        r0="${LABEL}not "$'\e[9m'"${am_ceffort}${RST}" r1=$r0
+        r0=$RED$'\e[9m'"${am_ceffort}${RST}" r1=$r0 r2=$r0
+    fi
+    # The effort the decision left (when it changed it) and why: the prompt's
+    # relation to the last one (extend, aside, new task…), or asked, kept…
+    if [ "$am_state" = routed ]; then
+        [ -n "${am_from:-}" ] && [ -n "$am_effort" ] && why="${am_from}→${am_effort}"
+        [ -n "${am_why:-}" ] && r1+="${r1:+ }${LABEL}${am_why}${RST}" why+="${why:+ · }${am_why}"
+        [ -n "$why" ] && r0+="${r0:+ }${LABEL}${why}${RST}"
     fi
     ((${#am_issue} > 24)) && am_issue="${am_issue:0:23}…"
     case $am_state in
         routed)
             ((am_conf < 0)) && am_conf=0; ((am_conf > 100)) && am_conf=100
             if ((am_conf >= 80)); then c=$GREEN; elif ((am_conf >= 60)); then c=$YELLOW; else c=$RED; fi
-            printf -v c '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; r0+="${r0:+ }$c" r1+="${r1:+ }$c" ;;
-        default)  r0+="${r0:+ }${LABEL}default${RST}" r1+="${r1:+ }${LABEL}default${RST}" ;;
-        pinned)   r0+="${r0:+ }${CYAN}pinned${RST}" r1+="${r1:+ }${CYAN}pinned${RST}" ;;
-        fallback) r0+="${r0:+ }${RED}⚠ fallback${RST}" r1+="${r1:+ }${RED}⚠${RST}" warn=1 ;;
-        error)    r0+="${r0:+ }${RED}⚠ ${am_issue:-catalog}${RST}" r1+="${r1:+ }${RED}⚠${RST}" warn=1 am_issue="" ;;
+            printf -v c '%s%d.%02d%s' "$c" $((am_conf / 100)) $((am_conf % 100)) "$RST"; t=$c ;;
+        default)  t="${LABEL}default${RST}" ;;
+        pinned)   t="${CYAN}pinned${RST}" ;;
+        fallback) t="${RED}⚠ fallback${RST}" r1+="${r1:+ }${RED}⚠${RST}" r2+="${r2:+ }${RED}⚠${RST}" warn=1 ;;
+        error)    t="${RED}⚠ ${am_issue:-catalog}${RST}" r1+="${r1:+ }${RED}⚠${RST}" r2+="${r2:+ }${RED}⚠${RST}" warn=1 am_issue="" ;;
+        *)        t="" ;;
     esac
+    r0+="${t:+${r0:+ }$t}"
+    [ -z "$warn" ] && { r1+="${t:+${r1:+ }$t}"; r2+="${t:+${r2:+ }$t}"; }
     if [ -n "${am_budget:-}" ]; then   # over automodel's spending cap
         r0+="${r0:+ }${YELLOW}⚠ budget${RST}"
-        [ -n "$warn" ] || r1+="${r1:+ }${YELLOW}⚠${RST}"
+        [ -n "$warn" ] || { r1+="${r1:+ }${YELLOW}⚠${RST}"; r2+="${r2:+ }${YELLOW}⚠${RST}"; }
         warn=1
     fi
     if [ -n "$am_issue" ]; then
         r0+="${r0:+ }${RED}⚠ jev: ${am_issue}${RST}"
-        [ -n "$warn" ] || r1+="${r1:+ }${RED}⚠${RST}"
+        [ -n "$warn" ] || { r1+="${r1:+ }${RED}⚠${RST}"; r2+="${r2:+ }${RED}⚠${RST}"; }
         warn=1
     fi
-    if [ -n "$am_flash" ]; then r0+="${r0:+ }${VIOLET}↻ ${am_flash}${RST}"; r1+="${r1:+ }${VIOLET}↻${RST}"; fi
+    if [ -n "$am_flash" ]; then r0+="${r0:+ }${VIOLET}↻ ${am_flash}${RST}"; r1+="${r1:+ }${VIOLET}↻${RST}"; r2+="${r2:+ }${VIOLET}↻${RST}"; fi
     if [ -n "$r0" ]; then
-        put route 0 "$r0"; put route 1 "$r1"
-        [ -n "$warn" ] && put route 2 "${RED}⚠${RST}"
+        put route 0 "$r0"; put route 1 "$r1"; put route 2 "$r2"
+        [ -n "$warn" ] && put route 3 "${RED}⚠${RST}"
     fi
 fi
 
@@ -793,7 +804,7 @@ compose() { # compose "<left segs>" "<right segs>" → REPLY, RW
 # What to give up first, least useful first, whatever the layout: each line
 # follows this order restricted to its own segments; a step naming several
 # segments advances them together.
-PRIORITY=(session lines route lines "5h 7d" meta cost model session ctx git cache git "ctx 5h 7d" model cost dir git cache
+PRIORITY=(session lines route lines "5h 7d" meta cost model session ctx git cache git route "ctx 5h 7d" model cost dir git cache
           model route "5h 7d" git 7d model)
 declare -A KNOWN=([dir]=1 [git]=1 [session]=1 [meta]=1 [model]=1 [route]=1 [ctx]=1 [5h]=1 [7d]=1 [cache]=1 [cost]=1 [lines]=1)
 fit_line() { # fit_line "<left segs>" "<right segs>" → REPLY, the most detailed line that fits
