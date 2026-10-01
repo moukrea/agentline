@@ -123,7 +123,7 @@ wiz_list() { # wiz_list <toggle|codex> → space-separated enabled keys
 }
 
 # The renderer's environment for a preview → WIZ_ENV.
-WIZ_AM_SAMPLE='{"v":1,"routed":true,"alias":"jev","model":"opus-5.5","label":"Opus 5.5","effort":"xhigh","mode":"","state":"routed","confidence":0.86,"pin":"","issue":"","flash":"switched","text":"jev → opus-5.5·xhigh 0.86"}'
+WIZ_AM_SAMPLE='{"v":1,"routed":true,"alias":"jev","model":"opus-5.5","label":"Opus 5.5","effort":"xhigh","mode":"","state":"routed","confidence":0.86,"pin":"","issue":"","flash":"switched","budget":"","why":"extend","from":"high","claude_effort":"","text":"automodel: Opus 5.5 xhigh (high→xhigh · extend 0.86)"}'
 wiz_env() {
     local k layout=${WIZ_VAL[LAYOUT]}
     [ "$layout" = custom ] && layout=$WIZ_LAYOUT_CUSTOM

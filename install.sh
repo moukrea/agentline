@@ -109,6 +109,17 @@ am_has_json() {
 is_am_statusline() { # is_am_statusline "<command>": automodel's own status line?
     [[ $1 == *automodel* && $1 == *" statusline" ]]
 }
+# jaunt's rich view puts its wrapper in statusLine and runs the one you had
+# behind it, kept on the wrapper's "# jaunt-original:" line (null for none).
+# Changing statusLine is still the way to change it: jaunt chains the new one.
+jaunt_original() { # jaunt_original "<command>" → stdout: the chained statusLine, compact
+    local f=$1
+    if [[ $f == \"* ]]; then f=${f#\"}; f=${f%%\"*}; else f=${f%% *}; fi
+    [[ ${f##*/} == jaunt-statusline && -f $f ]] || return 1
+    f=$(sed -n 's/^# jaunt-original: //p' "$f" | head -n 1)
+    f=$(jq -c 'if type == "object" or . == null then . else error end' <<<"$f" 2>/dev/null) && [ -n "$f" ] || return 1
+    echo "$f"
+}
 
 # Codex items closest to the Claude Code segments shown (the "mirror" option).
 mirror_items() { # mirror_items "<segments>" → stdout, space-separated
@@ -347,9 +358,14 @@ claude_install() {
     [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
     current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
     current_cmd=$(jq -r '.statusLine.command? // empty' "$CLAUDE_SETTINGS" 2>/dev/null) || current_cmd=""
+    local behind=""
+    if current=$(jaunt_original "$current_cmd"); then
+        behind=" (behind jaunt's wrapper)"
+        current_cmd=$(jq -r '.command? // empty' <<<"$current")
+    else current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS"); fi
     statusline_cmd "$current_cmd"
     desired=$(jq -cn --arg c "$REPLY" '{type: "command", command: $c, refreshInterval: 1}')
-    if [ "$current" = "$desired" ]; then same "statusLine in $CLAUDE_SETTINGS"; return 0; fi
+    if [ "$current" = "$desired" ]; then same "statusLine in $CLAUDE_SETTINGS$behind"; return 0; fi
     if [ "$current" != null ] && [[ $current != *agentline* ]] && [ ! -e "$DATA/claude-previous-statusline.json" ]; then
         printf '%s\n' "$current" > "$DATA/claude-previous-statusline.json"
         ok "previous statusLine kept for --uninstall"
@@ -357,6 +373,7 @@ claude_install() {
     backup_once "$CLAUDE_SETTINGS"
     jq --argjson d "$desired" '.statusLine = $d' "$CLAUDE_SETTINGS" | write_file "$CLAUDE_SETTINGS" 600 || true
     ok "statusLine in $CLAUDE_SETTINGS (refreshInterval 1 s)"
+    [ -z "$behind" ] || note "jaunt's rich view chains it behind its wrapper again within seconds (while jaunt runs)"
     # automodel's own status line: agentline takes over and shows its routing
     # (the model and effort it chose, and the route part) by asking automodel.
     if is_am_statusline "$current_cmd"; then
@@ -373,7 +390,8 @@ claude_uninstall() {
     say "Claude Code"
     local current restored="" prev="$DATA/claude-previous-statusline.json"
     if [ -f "$CLAUDE_SETTINGS" ] && command -v jq >/dev/null; then
-        current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
+        current=$(jaunt_original "$(jq -r '.statusLine.command? // empty' "$CLAUDE_SETTINGS")") \
+            || current=$(jq -c '.statusLine // null' "$CLAUDE_SETTINGS")
         if [[ $current == *agentline* ]]; then
             if [ -f "$prev" ]; then
                 jq --slurpfile p "$prev" '.statusLine = $p[0]' "$CLAUDE_SETTINGS" | write_file "$CLAUDE_SETTINGS" 600 || true

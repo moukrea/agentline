@@ -324,6 +324,10 @@ prints the `statusline_command = "…"` line to add to automodel's `config.toml`
 that automodel shows it before its segment. **Uninstalling automodel** leaves
 agentline in place; it simply stops showing routing.
 
+With [jaunt](https://github.com/moukrea/jaunt)'s rich view on, `statusLine` runs
+jaunt's wrapper, which runs agentline behind it: the installer reads which status
+line the wrapper chains and leaves it in place when it is agentline's.
+
 If automodel's own status line runs agentline as its chained `statusline_command`
 (it sets `AUTOMODEL_CHAINED=1`), agentline does not ask automodel: automodel
 prints its segment itself in that setup.
@@ -332,18 +336,19 @@ prints its segment itself in that setup.
 
 | Shown | Meaning |
 |---|---|
-| `0.86` | Jev, automodel's router, chose this model and effort with this confidence: green from 0.80, yellow from 0.60, red below. |
+| `extend 0.86` | Jev, automodel's router, chose this model and effort with this confidence: green from 0.80, yellow from 0.60, red below. Before it, why: how the prompt relates to the last one (`continue`, `extend`, `inform`, `side question`, `aside`, `wrap up`, `new task`, `resume`), or `asked` (an effort asked in words), `new`, `go-ahead`, `kept`… Needs automodel 0.19.0 or later for the why. |
+| `xhigh→high` | The effort the last decision left, when it changed it. |
 | `default` | Before the first decision of the session: automodel's default model and effort. |
 | `pinned` | Your `/effort` wins: routing pauses until you set it back to its default. |
 | `⚠ fallback` | Jev could not be asked; automodel used its default. |
 | `⚠ catalog` | automodel cannot load its model catalog (the model part keeps Claude Code's). |
-| `not ~~xhigh~~` | Right after the effort: automodel runs that effort, not the one Claude Code displays (its spinner, `/effort`), which is struck through. Per-turn effort over a fixed base keeps the prompt cache. Needs automodel 0.9.0 or later. |
+| ~~`xhigh`~~ | First, in red: the effort Claude Code displays (its spinner, `/effort`), struck through, when automodel runs another one this turn (the one in the model part). Per-turn effort over a fixed base keeps the prompt cache. Needs automodel 0.9.0 or later. |
 | `⚠ budget` | The session or the day is over automodel's spending cap (yellow). |
 | `⚠ jev: <why>` | Why Jev could not be asked, such as a missing OpenRouter key. |
 | `↻ switched`, `↻ compact`, `↻ cold` | For a moment (automodel's `statusline_flash`, 30 s) after a new decision: a model switch, a compaction, a cold prompt cache. |
 
-On narrower terminals the route part shortens to the number or word with a single
-`⚠` and `↻`, then to a lone `⚠` when something is wrong, then disappears. Hide it
+On narrower terminals the route part drops the effort left, then the why, keeping
+the number or word with a single `⚠` and `↻`, then to a lone `⚠` when something is wrong, then disappears. Hide it
 altogether by leaving `route` out of `AGENTLINE_SEGMENTS`; the model and effort
 still follow automodel. `AGENTLINE_AUTOMODEL=off` stops asking automodel: the
 session then shows as Claude Code reports it.
